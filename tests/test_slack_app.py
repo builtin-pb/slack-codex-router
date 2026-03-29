@@ -68,6 +68,25 @@ class FailingManager:
         raise AssertionError("expected handle_follow_up to fail in this test")
 
 
+class ExplodingCommands:
+    def __init__(self, *, error: str) -> None:
+        self.error = error
+        self.status_calls: list[str] = []
+
+    def status(self, thread_ts: str) -> str:
+        self.status_calls.append(thread_ts)
+        raise RuntimeError(self.error)
+
+    def cancel(self, thread_ts: str) -> str:
+        raise AssertionError("unexpected cancel call")
+
+    def what_changed(self, thread_ts: str) -> str:
+        raise AssertionError("unexpected what changed call")
+
+    def show_diff(self, project_path: Path) -> str:
+        raise AssertionError("unexpected show diff call")
+
+
 def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     registry = ProjectRegistry(
@@ -278,6 +297,71 @@ def test_follow_up_manager_failure_replies_instead_of_raising(tmp_path: Path) ->
     assert replies == ["Could not continue Codex session: resume failed"]
     assert len(manager.follow_up_calls) == 1
     assert watch_calls == []
+
+
+def test_control_command_failure_replies_instead_of_raising(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    router._commands = ExplodingCommands(error="status lookup failed")  # type: ignore[assignment]
+    replies: list[str] = []
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "status",
+        },
+        replies.append,
+    )
+
+    assert replies == ["Could not run router command: status lookup failed"]
+
+
+def test_successful_control_command_does_not_report_false_error_on_reply_failure(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+
+    def flaky_reply(text: str) -> None:
+        replies.append(text)
+        if text == "No task has been started in this thread yet.":
+            raise RuntimeError("slack send failed")
+
+    with pytest.raises(RuntimeError, match="slack send failed"):
+        router.handle_message(
+            {
+                "user": "U123",
+                "channel": "C123",
+                "ts": "1710000000.100000",
+                "text": "status",
+            },
+            flaky_reply,
+        )
+
+    assert replies == ["No task has been started in this thread yet."]
 
 
 def test_threaded_reply_without_stored_session_is_rejected(tmp_path: Path) -> None:

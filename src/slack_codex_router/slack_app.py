@@ -108,9 +108,11 @@ class SlackRouter:
 
     def _reply_command_result(self, reply: ReplyFn, command: Callable[[], str]) -> None:
         try:
-            reply(command())
+            result = command()
         except Exception as exc:
             reply(f"Could not run router command: {exc}")
+            return
+        reply(result)
 
     def _watch_completion(
         self,
