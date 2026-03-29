@@ -18,6 +18,11 @@ dev = [
   "pytest>=8.3.5",
 ]
 
+[dependency-groups]
+dev = [
+  "pytest>=8.3.5",
+]
+
 [project.scripts]
 slack-codex-router = "slack_codex_router.main:main"
 
