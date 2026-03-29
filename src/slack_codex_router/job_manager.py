@@ -66,6 +66,14 @@ class JobManager:
         current = self._active_by_thread.get(thread_ts)
         if current is not None:
             self._runner.interrupt(current.run)
+            latest_job = self._store.get_latest_job(thread_ts)
+            if latest_job is not None and str(latest_job["state"]) == "running":
+                self._store.finish_job(
+                    job_id=int(latest_job["job_id"]),
+                    exit_code=130,
+                    interrupted=True,
+                    summary="",
+                )
 
         session = self._store.get_thread_session(thread_ts)
         if session is None:
@@ -86,3 +94,65 @@ class JobManager:
         self._active_by_thread[thread_ts] = active
         self._active_by_project.setdefault(project.channel_id, set()).add(thread_ts)
         return active
+
+    def wait_for_thread(self, thread_ts: str) -> tuple[int, str, bool]:
+        active = self._active_by_thread.get(thread_ts)
+        if active is None:
+            latest_job = self._store.get_latest_job(thread_ts)
+            if latest_job is None:
+                raise RuntimeError(f"No active job found for thread {thread_ts}")
+
+            exit_code = int(latest_job["exit_code"] or 0)
+            summary = str(latest_job["last_result_summary"] or "")
+            interrupted = bool(latest_job["interrupted"])
+            return (exit_code, summary, interrupted)
+
+        try:
+            exit_code, summary = self._runner.wait(active.run, self._run_timeout_seconds)
+        except TypeError:
+            exit_code, summary = self._runner.wait(active.run)
+
+        if self._active_by_thread.get(thread_ts) is not active:
+            raise RuntimeError(f"Thread {thread_ts} is no longer the active run")
+
+        interrupted = False
+        return (exit_code, summary, interrupted)
+
+    def complete_thread(
+        self,
+        thread_ts: str,
+        *,
+        exit_code: int,
+        summary: str,
+        interrupted: bool,
+    ) -> None:
+        latest_job = self._store.get_latest_job(thread_ts)
+        if latest_job is None:
+            raise RuntimeError(f"No job found for thread {thread_ts}")
+
+        self._store.finish_job(
+            job_id=int(latest_job["job_id"]),
+            exit_code=exit_code,
+            interrupted=interrupted,
+            summary=summary,
+        )
+
+        status = "interrupted" if interrupted else "finished"
+        self._store.mark_thread_status(thread_ts, status)
+
+        active = self._active_by_thread.pop(thread_ts, None)
+        channel_id = None
+        session = self._store.get_thread_session(thread_ts)
+        if session is not None:
+            channel_id = str(session["channel_id"])
+
+        if channel_id is None:
+            return
+
+        project_threads = self._active_by_project.get(channel_id)
+        if project_threads is None:
+            return
+
+        project_threads.discard(thread_ts)
+        if not project_threads:
+            self._active_by_project.pop(channel_id, None)

@@ -76,12 +76,17 @@ class RouterStore:
                 (thread_ts,),
             ).fetchone()
 
-    def mark_thread_status(self, thread_ts: str, status: str, last_user_message_ts: str) -> None:
+    def mark_thread_status(
+        self,
+        thread_ts: str,
+        status: str,
+        last_user_message_ts: str | None = None,
+    ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE thread_sessions
-                SET status = ?, last_user_message_ts = ?, updated_at = CURRENT_TIMESTAMP
+                SET status = ?, last_user_message_ts = COALESCE(?, last_user_message_ts), updated_at = CURRENT_TIMESTAMP
                 WHERE thread_ts = ?
                 """,
                 (status, last_user_message_ts, thread_ts),
