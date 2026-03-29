@@ -48,6 +48,11 @@ class SlackRouter:
         thread_ts = str(event.get("thread_ts") or message_ts)
 
         if event.get("thread_ts"):
+            session = self._store.get_thread_session(thread_ts)
+            if session is None:
+                reply("This thread has no stored Codex session yet.")
+                return
+
             self._manager.handle_follow_up(
                 channel_id=channel_id,
                 thread_ts=thread_ts,
@@ -120,6 +125,9 @@ def build_app(*, bot_token: str, app_token: str, router: SlackRouter) -> SocketM
 
     @app.event("message")
     def on_message(event, say) -> None:
+        if event.get("subtype") or not event.get("user"):
+            return
+
         thread_ts = str(event.get("thread_ts") or event["ts"])
         router.handle_message(event, lambda text: say(text=text, thread_ts=thread_ts))
 

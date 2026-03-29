@@ -1,10 +1,12 @@
 from pathlib import Path
 
 import pytest
+from slack_bolt import App as BoltApp
 
 from slack_codex_router.job_manager import JobManager
 from slack_codex_router.registry import ProjectConfig, ProjectRegistry
-from slack_codex_router.slack_app import SlackRouter
+import slack_codex_router.slack_app as slack_app_module
+from slack_codex_router.slack_app import SlackRouter, build_app
 from slack_codex_router.store import RouterStore
 
 
@@ -171,3 +173,106 @@ def test_handle_message_rejects_invalid_requests_and_surfaces_limit_errors(tmp_p
         )
 
     assert limit_replies == ["Started Codex task for project `demo`."]
+
+
+def test_threaded_reply_without_stored_session_is_rejected(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=1,
+            )
+        }
+    )
+    manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+    watch_calls: list[tuple[str, str]] = []
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts)
+    )
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "thread_ts": "1710000000.100000",
+            "ts": "1710000001.100000",
+            "text": "follow up",
+        },
+        replies.append,
+    )
+
+    assert replies == ["This thread has no stored Codex session yet."]
+    assert watch_calls == []
+
+
+def test_build_app_ignores_subtypes_and_events_without_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_apps: dict[str, BoltApp] = {}
+
+    def app_factory(*, token: str) -> BoltApp:
+        app = BoltApp(
+            token=token,
+            token_verification_enabled=False,
+            request_verification_enabled=False,
+        )
+        created_apps["app"] = app
+        return app
+
+    monkeypatch.setattr(slack_app_module, "App", app_factory)
+
+    class RecordingRouter:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        def handle_message(self, event, reply) -> None:
+            self.events.append(dict(event))
+            reply("routed")
+
+    router = RecordingRouter()
+    handler = build_app(bot_token="x", app_token="y", router=router)
+    listener = created_apps["app"]._listeners[0]
+    replies: list[dict[str, str]] = []
+
+    listener.ack_function(
+        {
+            "subtype": "message_changed",
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "ignore me",
+        },
+        lambda **kwargs: replies.append(kwargs),
+    )
+    listener.ack_function(
+        {
+            "channel": "C123",
+            "ts": "1710000001.100000",
+            "text": "also ignore me",
+        },
+        lambda **kwargs: replies.append(kwargs),
+    )
+    listener.ack_function(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000002.100000",
+            "text": "route me",
+        },
+        lambda **kwargs: replies.append(kwargs),
+    )
+
+    assert handler.app is created_apps["app"]
+    assert router.events == [
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000002.100000",
+            "text": "route me",
+        }
+    ]
+    assert replies == [{"text": "routed", "thread_ts": "1710000002.100000"}]
