@@ -141,6 +141,23 @@ class BlockingStopSuccessRunner(FakeRunner):
         return (0, f"Summary for pid {run.pid}")
 
 
+class BlockingStopSuccessFailingResumeRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_started = threading.Event()
+        self.release_stop = threading.Event()
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        del run, timeout_seconds
+        self.stop_started.set()
+        self.release_stop.wait(timeout=1)
+        return True
+
+    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+        self.resume_calls.append((project_path, session_id, prompt))
+        raise RuntimeError("resume failed")
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -486,6 +503,72 @@ def test_cancel_thread_during_successful_transition_cancels_resolved_replacement
     assert latest_job is not None
     assert latest_job["pid"] == 1002
     assert getattr(active, "run").interrupted is True
+
+
+def test_stale_watcher_during_successful_stop_and_failed_resume_becomes_obsolete(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = BlockingStopSuccessFailingResumeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    follow_up_error: dict[str, Exception] = {}
+    watcher_error: dict[str, Exception] = {}
+    watcher_result: dict[str, tuple[int, str, bool]] = {}
+
+    def follow_up() -> None:
+        try:
+            manager.handle_follow_up(
+                channel_id="C123",
+                thread_ts="1710000000.100000",
+                user_message_ts="1710000001.100000",
+                prompt="latest request",
+                project=project,
+            )
+        except Exception as exc:
+            follow_up_error["value"] = exc
+
+    def stale_watch() -> None:
+        try:
+            watcher_result["value"] = manager.wait_for_thread(
+                "1710000000.100000",
+                expected_message_ts="1710000000.100000",
+            )
+        except Exception as exc:
+            watcher_error["value"] = exc
+
+    follow_up_thread = threading.Thread(target=follow_up)
+    follow_up_thread.start()
+    assert runner.stop_started.wait(timeout=1)
+
+    watcher_thread = threading.Thread(target=stale_watch)
+    watcher_thread.start()
+    watcher_thread.join(timeout=0.05)
+    assert watcher_thread.is_alive()
+
+    runner.release_stop.set()
+    follow_up_thread.join(timeout=1)
+    watcher_thread.join(timeout=1)
+
+    latest_job = store.get_latest_job("1710000000.100000")
+    session = store.get_thread_session("1710000000.100000")
+
+    assert isinstance(follow_up_error["value"], RuntimeError)
+    assert "resume failed" in str(follow_up_error["value"])
+    assert "value" not in watcher_result
+    assert isinstance(watcher_error["value"], RuntimeError)
+    assert "obsolete" in str(watcher_error["value"])
+    assert latest_job is not None
+    assert latest_job["state"] == "interrupted"
+    assert session is not None
+    assert session["status"] == "interrupted"
 
 
 def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path) -> None:

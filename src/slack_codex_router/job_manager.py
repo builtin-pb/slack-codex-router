@@ -71,6 +71,8 @@ class JobManager:
         while True:
             active = self._active_by_thread.get(thread_ts)
             if active is None:
+                if expected_message_ts is not None:
+                    self._assert_current_watcher(thread_ts, expected_message_ts)
                 return None
             if isinstance(active, ActiveRun):
                 if expected_message_ts is not None:
