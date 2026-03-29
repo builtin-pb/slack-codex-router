@@ -102,36 +102,7 @@ class JobManager:
 
         self._runner.interrupt(current.run)
 
-        try:
-            self._runner.wait(current.run, self._run_timeout_seconds)
-        except TypeError:
-            self._runner.wait(current.run)
-
-        latest_job = self._store.get_latest_job(thread_ts)
-        if latest_job is not None and str(latest_job["state"]) == "running":
-            self._store.finish_job(
-                job_id=int(latest_job["job_id"]),
-                exit_code=130,
-                interrupted=True,
-                summary="",
-            )
-
         self._store.mark_thread_status(thread_ts, "cancelled")
-
-        self._active_by_thread.pop(thread_ts, None)
-
-        session = self._store.get_thread_session(thread_ts)
-        if session is None:
-            return True
-
-        channel_id = str(session["channel_id"])
-        project_threads = self._active_by_project.get(channel_id)
-        if project_threads is None:
-            return True
-
-        project_threads.discard(thread_ts)
-        if not project_threads:
-            self._active_by_project.pop(channel_id, None)
 
         return True
 
@@ -155,7 +126,8 @@ class JobManager:
         if self._active_by_thread.get(thread_ts) is not active:
             raise RuntimeError(f"Thread {thread_ts} is no longer the active run")
 
-        interrupted = False
+        session = self._store.get_thread_session(thread_ts)
+        interrupted = session is not None and str(session["status"]) == "cancelled"
         self.complete_thread(
             thread_ts,
             exit_code=exit_code,
@@ -176,6 +148,11 @@ class JobManager:
         if latest_job is None:
             raise RuntimeError(f"No job found for thread {thread_ts}")
 
+        session = self._store.get_thread_session(thread_ts)
+        cancelled = session is not None and str(session["status"]) == "cancelled"
+        if cancelled:
+            interrupted = True
+
         self._store.finish_job(
             job_id=int(latest_job["job_id"]),
             exit_code=exit_code,
@@ -183,7 +160,7 @@ class JobManager:
             summary=summary,
         )
 
-        status = "interrupted" if interrupted else "finished"
+        status = "cancelled" if cancelled else ("interrupted" if interrupted else "finished")
         self._store.mark_thread_status(thread_ts, status)
 
         active = self._active_by_thread.pop(thread_ts, None)

@@ -53,6 +53,7 @@ class BlockingRunner(FakeRunner):
     def __init__(self) -> None:
         super().__init__()
         self.interrupt_called = threading.Event()
+        self.wait_started = threading.Event()
         self.release_wait = threading.Event()
         self.wait_calls: list[tuple[object, int | None]] = []
 
@@ -62,8 +63,9 @@ class BlockingRunner(FakeRunner):
 
     def wait(self, run: FakeRun, timeout_seconds: int | None = None) -> tuple[int, str]:
         self.wait_calls.append((run, timeout_seconds))
+        self.wait_started.set()
         self.release_wait.wait(timeout=1)
-        return (130, "")
+        return (130, "Cancelled run summary")
 
 
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
@@ -120,7 +122,7 @@ def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path
         )
 
 
-def test_cancel_thread_keeps_capacity_until_process_stops(tmp_path: Path) -> None:
+def test_cancel_thread_preserves_cancelled_state_until_wait_for_thread_finishes(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = BlockingRunner()
     manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
@@ -134,6 +136,16 @@ def test_cancel_thread_keeps_capacity_until_process_stops(tmp_path: Path) -> Non
         project=project,
     )
 
+    wait_result: dict[str, tuple[int, str, bool]] = {}
+
+    def watch_thread() -> None:
+        wait_result["value"] = manager.wait_for_thread("1710000000.100000")
+
+    watcher = threading.Thread(target=watch_thread)
+    watcher.start()
+
+    assert runner.wait_started.wait(timeout=1)
+
     cancel_result: dict[str, bool] = {}
 
     def cancel_thread() -> None:
@@ -141,8 +153,10 @@ def test_cancel_thread_keeps_capacity_until_process_stops(tmp_path: Path) -> Non
 
     cancel_worker = threading.Thread(target=cancel_thread)
     cancel_worker.start()
+    cancel_worker.join(timeout=1)
 
     assert runner.interrupt_called.wait(timeout=1)
+    assert cancel_result["value"] is True
     with pytest.raises(RuntimeError, match="Project concurrency limit reached"):
         manager.start_new_thread(
             channel_id="C123",
@@ -154,15 +168,18 @@ def test_cancel_thread_keeps_capacity_until_process_stops(tmp_path: Path) -> Non
 
     session = store.get_thread_session("1710000000.100000")
     assert session is not None
-    assert session["status"] == "running"
+    assert session["status"] == "cancelled"
 
     runner.release_wait.set()
-    cancel_worker.join(timeout=1)
+    watcher.join(timeout=1)
 
-    assert cancel_result["value"] is True
+    assert wait_result["value"] == (130, "Cancelled run summary", True)
     session = store.get_thread_session("1710000000.100000")
     assert session is not None
     assert session["status"] == "cancelled"
+    latest_job = store.get_latest_job("1710000000.100000")
+    assert latest_job is not None
+    assert latest_job["interrupted"] == 1
     assert len(runner.wait_calls) == 1
 
     manager.start_new_thread(
