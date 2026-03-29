@@ -68,6 +68,7 @@ class JobManager:
     ) -> ActiveRun:
         current = self._active_by_thread.get(thread_ts)
         if current is not None:
+            self._active_by_thread.pop(thread_ts, None)
             self._runner.interrupt(current.run)
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is not None and str(latest_job["state"]) == "running":
