@@ -19,7 +19,7 @@ class FakeManager:
 
 def test_status_reports_missing_thread(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     assert commands.status("1710000000.100000") == "No task has been started in this thread yet."
 
@@ -33,14 +33,14 @@ def test_status_reports_existing_thread_state(tmp_path: Path) -> None:
         status="running",
         last_user_message_ts="1710000000.100000",
     )
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     assert commands.status("1710000000.100000") == "Thread status: running"
 
 
 def test_cancel_reports_unconfigured_manager(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     assert commands.cancel("1710000000.100000") == "Cancel is not configured."
 
@@ -48,7 +48,7 @@ def test_cancel_reports_unconfigured_manager(tmp_path: Path) -> None:
 def test_cancel_reports_no_active_run_when_manager_returns_false(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     manager = FakeManager(cancelled=False)
-    commands = RouterCommands(store=store, manager=manager)
+    commands = RouterCommands(store, manager=manager)
 
     assert commands.cancel("1710000000.100000") == "There is no active run to cancel."
     assert manager.cancel_calls == ["1710000000.100000"]
@@ -57,7 +57,7 @@ def test_cancel_reports_no_active_run_when_manager_returns_false(tmp_path: Path)
 def test_cancel_reports_cancellation_when_active_run_exists(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     manager = FakeManager(cancelled=True)
-    commands = RouterCommands(store=store, manager=manager)
+    commands = RouterCommands(store, manager=manager)
 
     assert commands.cancel("1710000000.100000") == "Cancelled the active run."
     assert manager.cancel_calls == ["1710000000.100000"]
@@ -65,7 +65,7 @@ def test_cancel_reports_cancellation_when_active_run_exists(tmp_path: Path) -> N
 
 def test_show_diff_uses_git_diff_stat(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     called = {}
 
@@ -93,7 +93,7 @@ def test_show_diff_uses_git_diff_stat(tmp_path: Path) -> None:
 
 def test_show_diff_returns_fallback_when_repo_is_clean(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     from slack_codex_router import commands as commands_module
 
@@ -114,6 +114,38 @@ def test_what_changed_returns_latest_summary(tmp_path: Path) -> None:
     job_id = store.start_job(thread_ts="1710000000.100000", pid=4242, log_path=str(tmp_path / "job.log"))
     store.finish_job(job_id=job_id, exit_code=0, interrupted=False, summary="Updated README.md and app.py")
 
-    commands = RouterCommands(store=store)
+    commands = RouterCommands(store)
 
     assert commands.what_changed("1710000000.100000") == "Updated README.md and app.py"
+
+
+def test_what_changed_skips_newer_running_job(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    finished_job_id = store.start_job(
+        thread_ts="1710000000.100000",
+        pid=4242,
+        log_path=str(tmp_path / "finished.log"),
+    )
+    store.finish_job(
+        job_id=finished_job_id,
+        exit_code=0,
+        interrupted=False,
+        summary="Updated README.md and app.py",
+    )
+    store.start_job(
+        thread_ts="1710000000.100000",
+        pid=4343,
+        log_path=str(tmp_path / "running.log"),
+    )
+
+    commands = RouterCommands(store)
+
+    assert commands.what_changed("1710000000.100000") == "Updated README.md and app.py"
+
+
+def test_router_commands_accepts_positional_store(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+
+    commands = RouterCommands(store)
+
+    assert commands.status("1710000000.100000") == "No task has been started in this thread yet."

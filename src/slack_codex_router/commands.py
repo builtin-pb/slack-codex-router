@@ -8,7 +8,7 @@ from slack_codex_router.store import RouterStore
 
 
 class RouterCommands:
-    def __init__(self, *, store: RouterStore, manager: JobManager | None = None) -> None:
+    def __init__(self, store: RouterStore, manager: JobManager | None = None) -> None:
         self._store = store
         self._manager = manager
 
@@ -28,7 +28,7 @@ class RouterCommands:
         return "There is no active run to cancel."
 
     def what_changed(self, thread_ts: str) -> str:
-        summary = self._store.get_latest_result_summary(thread_ts)
+        summary = self._store.get_latest_completed_result_summary(thread_ts)
         if summary is None:
             return "No completed result is available for this thread yet."
         return summary

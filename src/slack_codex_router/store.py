@@ -129,12 +129,22 @@ class RouterStore:
             return None
         return str(session["status"])
 
-    def get_latest_result_summary(self, thread_ts: str) -> str | None:
-        job = self.get_latest_job(thread_ts)
+    def get_latest_completed_result_summary(self, thread_ts: str) -> str | None:
+        with self._connect() as connection:
+            job = connection.execute(
+                """
+                SELECT last_result_summary
+                FROM jobs
+                WHERE thread_ts = ?
+                  AND state != 'running'
+                  AND last_result_summary IS NOT NULL
+                  AND last_result_summary != ''
+                ORDER BY job_id DESC
+                LIMIT 1
+                """,
+                (thread_ts,),
+            ).fetchone()
+
         if job is None:
             return None
-
-        summary = job["last_result_summary"]
-        if not summary:
-            return None
-        return str(summary)
+        return str(job["last_result_summary"])
