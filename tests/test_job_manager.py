@@ -123,6 +123,24 @@ class BlockingStopFailureRunner(FakeRunner):
         return (0, "Original run completed after transition")
 
 
+class BlockingStopSuccessRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_started = threading.Event()
+        self.release_stop = threading.Event()
+        self.wait_calls: list[tuple[FakeRun, int | None]] = []
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        del run, timeout_seconds
+        self.stop_started.set()
+        self.release_stop.wait(timeout=1)
+        return True
+
+    def wait(self, run: FakeRun, timeout_seconds: int | None = None) -> tuple[int, str]:
+        self.wait_calls.append((run, timeout_seconds))
+        return (0, f"Summary for pid {run.pid}")
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -284,7 +302,7 @@ def test_authoritative_watcher_waits_through_transition_when_stop_fails(tmp_path
     assert len(runner.wait_calls) == 1
 
 
-def test_cancel_thread_during_transition_returns_false_without_crashing(tmp_path: Path) -> None:
+def test_cancel_thread_during_failed_transition_cancels_restored_original_run(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = BlockingStopFailureRunner()
     manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
@@ -327,14 +345,147 @@ def test_cancel_thread_during_transition_returns_false_without_crashing(tmp_path
 
     cancel_thread = threading.Thread(target=cancel_during_transition)
     cancel_thread.start()
-    cancel_thread.join(timeout=1)
+    cancel_thread.join(timeout=0.05)
+    assert cancel_thread.is_alive()
 
     runner.release_stop.set()
     follow_up_thread.join(timeout=1)
+    cancel_thread.join(timeout=1)
+
+    session = store.get_thread_session("1710000000.100000")
 
     assert "value" not in cancel_error
-    assert cancel_result["value"] is False
+    assert cancel_result["value"] is True
     assert isinstance(follow_up_error["value"], RuntimeError)
+    assert session is not None
+    assert session["status"] == "cancelled"
+
+
+def test_stale_watcher_entering_during_successful_transition_never_waits_on_replacement_run(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = BlockingStopSuccessRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    follow_up_error: dict[str, Exception] = {}
+    watcher_error: dict[str, Exception] = {}
+
+    def follow_up() -> None:
+        try:
+            manager.handle_follow_up(
+                channel_id="C123",
+                thread_ts="1710000000.100000",
+                user_message_ts="1710000001.100000",
+                prompt="latest request",
+                project=project,
+            )
+        except Exception as exc:
+            follow_up_error["value"] = exc
+
+    def watch_stale() -> None:
+        try:
+            manager.wait_for_thread(
+                "1710000000.100000",
+                expected_message_ts="1710000000.100000",
+            )
+        except Exception as exc:
+            watcher_error["value"] = exc
+
+    follow_up_thread = threading.Thread(target=follow_up)
+    follow_up_thread.start()
+    assert runner.stop_started.wait(timeout=1)
+
+    stale_watcher = threading.Thread(target=watch_stale)
+    stale_watcher.start()
+    stale_watcher.join(timeout=0.05)
+    assert stale_watcher.is_alive()
+
+    runner.release_stop.set()
+    follow_up_thread.join(timeout=1)
+    stale_watcher.join(timeout=1)
+
+    assert "value" not in follow_up_error
+    assert isinstance(watcher_error["value"], RuntimeError)
+    assert "obsolete" in str(watcher_error["value"])
+    assert runner.wait_calls == []
+
+    result = manager.wait_for_thread("1710000000.100000", expected_message_ts="1710000001.100000")
+
+    assert result == (0, "Summary for pid 1002", False)
+    assert [run.pid for run, _ in runner.wait_calls] == [1002]
+
+
+def test_cancel_thread_during_successful_transition_cancels_resolved_replacement_run(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = BlockingStopSuccessRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    follow_up_error: dict[str, Exception] = {}
+
+    def follow_up() -> None:
+        try:
+            manager.handle_follow_up(
+                channel_id="C123",
+                thread_ts="1710000000.100000",
+                user_message_ts="1710000001.100000",
+                prompt="latest request",
+                project=project,
+            )
+        except Exception as exc:
+            follow_up_error["value"] = exc
+
+    follow_up_thread = threading.Thread(target=follow_up)
+    follow_up_thread.start()
+    assert runner.stop_started.wait(timeout=1)
+
+    cancel_error: dict[str, Exception] = {}
+    cancel_result: dict[str, bool] = {}
+
+    def cancel_during_transition() -> None:
+        try:
+            cancel_result["value"] = manager.cancel_thread("1710000000.100000")
+        except Exception as exc:
+            cancel_error["value"] = exc
+
+    cancel_thread = threading.Thread(target=cancel_during_transition)
+    cancel_thread.start()
+    cancel_thread.join(timeout=0.05)
+    assert cancel_thread.is_alive()
+
+    runner.release_stop.set()
+    follow_up_thread.join(timeout=1)
+    cancel_thread.join(timeout=1)
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+    active = manager._active_by_thread["1710000000.100000"]
+
+    assert "value" not in follow_up_error
+    assert "value" not in cancel_error
+    assert cancel_result["value"] is True
+    assert session is not None
+    assert session["status"] == "cancelled"
+    assert session["last_user_message_ts"] == "1710000001.100000"
+    assert latest_job is not None
+    assert latest_job["pid"] == 1002
+    assert getattr(active, "run").interrupted is True
 
 
 def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path) -> None:

@@ -65,6 +65,7 @@ class JobManager:
         thread_ts: str,
         *,
         expected_message_ts: str | None,
+        wait_for_transition_without_owner: bool = False,
     ) -> ActiveRun | None:
         deadline = time.monotonic() + self._follow_up_stop_timeout_seconds
         while True:
@@ -72,10 +73,13 @@ class JobManager:
             if active is None:
                 return None
             if isinstance(active, ActiveRun):
+                if expected_message_ts is not None:
+                    self._assert_current_watcher(thread_ts, expected_message_ts)
                 return active
-            if expected_message_ts is None:
+            if expected_message_ts is None and not wait_for_transition_without_owner:
                 raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
-            self._assert_current_watcher(thread_ts, expected_message_ts)
+            if expected_message_ts is not None:
+                self._assert_current_watcher(thread_ts, expected_message_ts)
             if time.monotonic() >= deadline:
                 raise RuntimeError(f"Timed out waiting for thread {thread_ts} transition to resolve")
             time.sleep(0.01)
@@ -178,10 +182,15 @@ class JobManager:
         return active
 
     def cancel_thread(self, thread_ts: str) -> bool:
-        current = self._active_by_thread.get(thread_ts)
-        if current is None:
+        try:
+            current = self._resolve_active_for_wait(
+                thread_ts,
+                expected_message_ts=None,
+                wait_for_transition_without_owner=True,
+            )
+        except RuntimeError:
             return False
-        if not isinstance(current, ActiveRun):
+        if current is None:
             return False
 
         self._runner.interrupt(current.run)
