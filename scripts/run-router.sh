@@ -35,4 +35,6 @@ fi
 
 load_env_file .env
 
-exec /Users/builtin.pb/.local/bin/uv run python -m slack_codex_router.main run
+export PATH="/Users/builtin.pb/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+exec uv run python -m slack_codex_router.main run
