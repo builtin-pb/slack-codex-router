@@ -90,6 +90,17 @@ class StopBeforeResumeRunner(FakeRunner):
         return super().resume(project_path, session_id, prompt)
 
 
+class StoppingRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_calls: list[tuple[FakeRun, float]] = []
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        run.interrupted = True
+        self.stop_calls.append((run, timeout_seconds))
+        return True
+
+
 class StopFailureRunner(FakeRunner):
     def __init__(self) -> None:
         super().__init__()
@@ -158,6 +169,19 @@ class BlockingStopSuccessFailingResumeRunner(FakeRunner):
         raise RuntimeError("resume failed")
 
 
+class FailStartJobStore(RouterStore):
+    def __init__(self, db_path: Path, *, fail_on_call: int) -> None:
+        super().__init__(db_path)
+        self._fail_on_call = fail_on_call
+        self._start_job_calls = 0
+
+    def start_job(self, *, thread_ts: str, pid: int, log_path: str) -> int:
+        self._start_job_calls += 1
+        if self._start_job_calls == self._fail_on_call:
+            raise RuntimeError(f"start_job failed for {thread_ts} pid {pid}")
+        return super().start_job(thread_ts=thread_ts, pid=pid, log_path=log_path)
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -188,6 +212,36 @@ def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path)
     assert session["codex_thread_id"] == "session-1"
 
 
+def test_start_new_thread_rolls_back_launched_run_when_start_job_write_fails(tmp_path: Path) -> None:
+    store = FailStartJobStore(tmp_path / "router.sqlite3", fail_on_call=1)
+    runner = StoppingRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    with pytest.raises(RuntimeError, match="start_job failed"):
+        manager.start_new_thread(
+            channel_id="C123",
+            thread_ts="1710000000.100000",
+            user_message_ts="1710000000.100000",
+            prompt="initial request",
+            project=project,
+        )
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert len(runner.stop_calls) == 1
+    stopped_run, timeout_seconds = runner.stop_calls[0]
+    assert stopped_run.pid == 1001
+    assert timeout_seconds == 5.0
+    assert manager.active_thread_count() == 0
+    assert store.list_active_jobs() == []
+    assert latest_job is None
+    assert session is not None
+    assert session["status"] == "interrupted"
+    assert session["last_user_message_ts"] == "1710000000.100000"
+
+
 def test_follow_up_waits_for_previous_run_to_stop_before_resume(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = StopBeforeResumeRunner()
@@ -216,6 +270,49 @@ def test_follow_up_waits_for_previous_run_to_stop_before_resume(tmp_path: Path) 
     assert runner.resume_seen_stopped is True
     assert latest_job is not None
     assert latest_job["pid"] == 1002
+
+
+def test_follow_up_rolls_back_replacement_run_when_start_job_write_fails(tmp_path: Path) -> None:
+    store = FailStartJobStore(tmp_path / "router.sqlite3", fail_on_call=2)
+    runner = StoppingRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    original_run = manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    with pytest.raises(RuntimeError, match="start_job failed"):
+        manager.handle_follow_up(
+            channel_id="C123",
+            thread_ts="1710000000.100000",
+            user_message_ts="1710000001.100000",
+            prompt="latest request",
+            project=project,
+        )
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert len(runner.stop_calls) == 2
+    stopped_original, original_timeout = runner.stop_calls[0]
+    stopped_replacement, replacement_timeout = runner.stop_calls[1]
+    assert stopped_original is original_run.run
+    assert stopped_replacement.pid == 1002
+    assert original_timeout == 5.0
+    assert replacement_timeout == 5.0
+    assert manager.active_thread_count() == 0
+    assert store.list_active_jobs() == []
+    assert latest_job is not None
+    assert latest_job["pid"] == 1001
+    assert latest_job["state"] == "interrupted"
+    assert session is not None
+    assert session["status"] == "interrupted"
+    assert session["last_user_message_ts"] == "1710000001.100000"
 
 
 def test_follow_up_stop_failure_keeps_original_run_and_watcher_authoritative(tmp_path: Path) -> None:

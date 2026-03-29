@@ -10,6 +10,10 @@ from slack_codex_router.store import RouterStore
 _TRANSITIONING = object()
 
 
+class StaleWatcherError(RuntimeError):
+    pass
+
+
 @dataclass
 class ActiveRun:
     thread_ts: str
@@ -48,7 +52,7 @@ class JobManager:
             raise RuntimeError(f"No thread session found for thread {thread_ts}")
 
         if str(session["last_user_message_ts"]) != expected_message_ts:
-            raise RuntimeError(f"Watcher for thread {thread_ts} is obsolete")
+            raise StaleWatcherError(f"Watcher for thread {thread_ts} is obsolete")
 
     def _remove_active_tracking(self, thread_ts: str, channel_id: str) -> None:
         self._active_by_thread.pop(thread_ts, None)
@@ -103,14 +107,24 @@ class JobManager:
             raise RuntimeError("Project concurrency limit reached")
 
         run = self._runner.start(project.path, prompt)
-        self._store.upsert_thread_session(
-            thread_ts=thread_ts,
-            channel_id=channel_id,
-            codex_thread_id=run.thread_id,
-            status="running",
-            last_user_message_ts=user_message_ts,
-        )
-        self._store.start_job(thread_ts=thread_ts, pid=run.pid, log_path=str(run.log_path))
+        try:
+            self._store.upsert_thread_session(
+                thread_ts=thread_ts,
+                channel_id=channel_id,
+                codex_thread_id=run.thread_id,
+                status="running",
+                last_user_message_ts=user_message_ts,
+            )
+            self._store.start_job(thread_ts=thread_ts, pid=run.pid, log_path=str(run.log_path))
+        except Exception:
+            self._stop_launched_run(run, thread_ts=thread_ts)
+            self._store.mark_thread_status(
+                thread_ts,
+                "interrupted",
+                last_user_message_ts=user_message_ts,
+            )
+            self._remove_active_tracking(thread_ts, project.channel_id)
+            raise
 
         active = ActiveRun(thread_ts=thread_ts, session_id=run.thread_id, pid=run.pid, run=run)
         self._active_by_thread[thread_ts] = active
@@ -163,6 +177,7 @@ class JobManager:
             last_user_message_ts=user_message_ts,
         )
 
+        run = None
         try:
             run = self._runner.resume(project.path, session_id, prompt)
             self._store.upsert_thread_session(
@@ -174,6 +189,8 @@ class JobManager:
             )
             self._store.start_job(thread_ts=thread_ts, pid=run.pid, log_path=str(run.log_path))
         except Exception:
+            if run is not None:
+                self._stop_launched_run(run, thread_ts=thread_ts)
             self._remove_active_tracking(thread_ts, project.channel_id)
             self._store.mark_thread_status(thread_ts, "interrupted")
             raise
@@ -226,7 +243,7 @@ class JobManager:
 
         self._assert_current_watcher(thread_ts, expected_message_ts)
         if self._active_by_thread.get(thread_ts) is not active:
-            raise RuntimeError(f"Thread {thread_ts} is no longer the active run")
+            raise StaleWatcherError(f"Watcher for thread {thread_ts} is obsolete")
 
         session = self._store.get_thread_session(thread_ts)
         interrupted = session is not None and str(session["status"]) == "cancelled"
@@ -270,3 +287,14 @@ class JobManager:
             return
 
         self._remove_active_tracking(thread_ts, str(session["channel_id"]))
+
+    def _stop_launched_run(self, run: object, *, thread_ts: str) -> None:
+        stop_run = getattr(self._runner, "stop", None)
+        if stop_run is not None:
+            stopped = stop_run(run, self._follow_up_stop_timeout_seconds)
+            if stopped:
+                return
+            raise RuntimeError(
+                f"Timed out stopping launched Codex run for thread {thread_ts} after persistence failure"
+            )
+        self._runner.interrupt(run)

@@ -3,11 +3,15 @@ from pathlib import Path
 import pytest
 from slack_bolt import App as BoltApp
 
+import slack_codex_router.job_manager as job_manager_module
 from slack_codex_router.job_manager import JobManager
 from slack_codex_router.registry import ProjectConfig, ProjectRegistry
 import slack_codex_router.slack_app as slack_app_module
 from slack_codex_router.slack_app import SlackRouter, build_app
 from slack_codex_router.store import RouterStore
+
+
+StaleWatcherError = getattr(job_manager_module, "StaleWatcherError", RuntimeError)
 
 
 class FakeRunner:
@@ -66,6 +70,21 @@ class FailingManager:
         if self.follow_up_error is not None:
             raise RuntimeError(self.follow_up_error)
         raise AssertionError("expected handle_follow_up to fail in this test")
+
+
+class CompletionFailureManager:
+    def __init__(self, *, wait_error: Exception) -> None:
+        self.wait_error = wait_error
+        self.wait_calls: list[dict[str, object]] = []
+
+    def wait_for_thread(self, thread_ts: str, *, expected_message_ts: str | None = None):
+        self.wait_calls.append(
+            {
+                "thread_ts": thread_ts,
+                "expected_message_ts": expected_message_ts,
+            }
+        )
+        raise self.wait_error
 
 
 class ExplodingCommands:
@@ -297,6 +316,46 @@ def test_follow_up_manager_failure_replies_instead_of_raising(tmp_path: Path) ->
     assert replies == ["Could not continue Codex session: resume failed"]
     assert len(manager.follow_up_calls) == 1
     assert watch_calls == []
+
+
+def test_watch_completion_replies_for_unexpected_runtime_failure(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry({})
+    manager = CompletionFailureManager(wait_error=RuntimeError("finish path exploded"))
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+
+    router._watch_completion(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        expected_message_ts="1710000000.100000",
+        reply=replies.append,
+    )
+
+    assert manager.wait_calls == [
+        {
+            "thread_ts": "1710000000.100000",
+            "expected_message_ts": "1710000000.100000",
+        }
+    ]
+    assert replies == ["Codex completion handling failed: finish path exploded"]
+
+
+def test_watch_completion_swallows_only_stale_watcher(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry({})
+    manager = CompletionFailureManager(wait_error=StaleWatcherError("Watcher for thread 1710000000.100000 is obsolete"))
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+
+    router._watch_completion(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        expected_message_ts="1710000000.100000",
+        reply=replies.append,
+    )
+
+    assert replies == []
 
 
 def test_control_command_failure_replies_instead_of_raising(tmp_path: Path) -> None:

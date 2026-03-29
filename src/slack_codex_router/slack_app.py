@@ -7,7 +7,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from slack_codex_router.commands import RouterCommands
-from slack_codex_router.job_manager import JobManager
+from slack_codex_router.job_manager import JobManager, StaleWatcherError
 from slack_codex_router.registry import ProjectRegistry
 from slack_codex_router.store import RouterStore
 
@@ -127,7 +127,10 @@ class SlackRouter:
                 thread_ts,
                 expected_message_ts=expected_message_ts,
             )
-        except RuntimeError:
+        except StaleWatcherError:
+            return
+        except RuntimeError as exc:
+            reply(f"Codex completion handling failed: {exc}")
             return
 
         self.publish_completion(

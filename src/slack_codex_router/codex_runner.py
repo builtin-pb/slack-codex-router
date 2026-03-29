@@ -140,7 +140,21 @@ class CodexRunner:
         default_thread_id: str | None = None,
     ) -> CodexRun:
         process = self._spawn(project_path, command, log_path)
-        thread_id = self._wait_for_thread_id(log_path, process, default_thread_id=default_thread_id)
+        provisional_run = CodexRun(
+            thread_id=default_thread_id or "",
+            pid=process.pid,
+            process=process,
+            output_file=output_file,
+            log_path=log_path,
+        )
+        try:
+            thread_id = self._wait_for_thread_id(log_path, process, default_thread_id=default_thread_id)
+        except Exception:
+            try:
+                self.stop(provisional_run)
+            except Exception:
+                pass
+            raise
         return CodexRun(
             thread_id=thread_id,
             pid=process.pid,

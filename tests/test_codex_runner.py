@@ -45,6 +45,40 @@ class FakeLaunchProcess:
         return None
 
 
+def test_start_stops_spawned_child_when_thread_id_discovery_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CodexRunner()
+    process = FakeLaunchProcess(pid=9876)
+    stop_calls: list[tuple[CodexRun, float]] = []
+
+    monkeypatch.setattr(runner, "_spawn", lambda project_path, command, log_path: process)
+
+    def fail_wait_for_thread_id(log_path: Path, proc: FakeLaunchProcess, default_thread_id: str | None = None) -> str:
+        del log_path, default_thread_id
+        assert proc is process
+        raise RuntimeError("Timed out waiting for Codex thread id")
+
+    monkeypatch.setattr(runner, "_wait_for_thread_id", fail_wait_for_thread_id)
+    monkeypatch.setattr(
+        runner,
+        "stop",
+        lambda run, timeout_seconds=5.0: stop_calls.append((run, timeout_seconds)) or True,
+    )
+
+    with pytest.raises(RuntimeError, match="Timed out waiting for Codex thread id"):
+        runner.start(tmp_path, "start task")
+
+    assert len(stop_calls) == 1
+    stopped_run, timeout_seconds = stop_calls[0]
+    assert stopped_run.pid == process.pid
+    assert stopped_run.process is process
+    assert stopped_run.output_file.parent == tmp_path
+    assert stopped_run.log_path.parent == tmp_path
+    assert timeout_seconds == 5.0
+
+
 def test_start_allocates_unique_output_and_log_paths_per_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
