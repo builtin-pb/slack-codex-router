@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+from slack_codex_router.config import load_config
+from slack_codex_router.registry import ProjectRegistry
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="slack-codex-router")
@@ -14,7 +17,14 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    return 0 if args.command == "run" else 1
+    if args.command != "run":
+        return 1
+
+    config = load_config()
+    ProjectRegistry.from_yaml(config.projects_file)
+    config.log_dir.mkdir(parents=True, exist_ok=True)
+    config.state_db.parent.mkdir(parents=True, exist_ok=True)
+    return 0
 
 
 if __name__ == "__main__":

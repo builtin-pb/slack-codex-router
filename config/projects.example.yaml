@@ -1,0 +1,5 @@
+projects:
+  - channel_id: C08TEMPLATE
+    name: template
+    path: /Users/builtin.pb/Desktop/Template
+    max_concurrent_jobs: 2
