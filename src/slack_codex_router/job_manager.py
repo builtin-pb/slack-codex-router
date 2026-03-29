@@ -96,11 +96,16 @@ class JobManager:
         return active
 
     def cancel_thread(self, thread_ts: str) -> bool:
-        current = self._active_by_thread.pop(thread_ts, None)
+        current = self._active_by_thread.get(thread_ts)
         if current is None:
             return False
 
         self._runner.interrupt(current.run)
+
+        try:
+            self._runner.wait(current.run, self._run_timeout_seconds)
+        except TypeError:
+            self._runner.wait(current.run)
 
         latest_job = self._store.get_latest_job(thread_ts)
         if latest_job is not None and str(latest_job["state"]) == "running":
@@ -112,6 +117,8 @@ class JobManager:
             )
 
         self._store.mark_thread_status(thread_ts, "cancelled")
+
+        self._active_by_thread.pop(thread_ts, None)
 
         session = self._store.get_thread_session(thread_ts)
         if session is None:
