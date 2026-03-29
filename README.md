@@ -17,6 +17,8 @@ cp .env.example .env
 cp config/projects.example.yaml config/projects.yaml
 ```
 
+The first copy command gives you a complete environment template to fill in locally. The second copy command gives you a complete channel/project registry template to edit for your Slack channels and project paths.
+
 3. Edit `.env` and `config/projects.yaml` with real values before starting the service.
 
 ## Run
