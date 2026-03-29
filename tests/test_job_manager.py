@@ -54,7 +54,7 @@ def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path)
     manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
     project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
 
-    manager.start_new_thread(
+    original_run = manager.start_new_thread(
         channel_id="C123",
         thread_ts="1710000000.100000",
         user_message_ts="1710000000.100000",
@@ -73,6 +73,7 @@ def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path)
     session = store.get_thread_session("1710000000.100000")
 
     assert runner.resume_calls == [(tmp_path, "session-1", "latest request")]
+    assert original_run.run.interrupted is True
     assert latest_job["pid"] == 1002
     assert session["codex_thread_id"] == "session-1"
 
