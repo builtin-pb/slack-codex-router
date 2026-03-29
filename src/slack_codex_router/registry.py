@@ -32,6 +32,10 @@ class ProjectRegistry:
                 raise ValueError(
                     f"Project path for channel '{channel_id}' does not exist: {project_path}"
                 )
+            if not project_path.is_dir():
+                raise ValueError(
+                    f"Project path for channel '{channel_id}' is not a directory: {project_path}"
+                )
 
             projects[channel_id] = ProjectConfig(
                 channel_id=channel_id,

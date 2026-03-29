@@ -358,6 +358,50 @@ def test_watch_completion_swallows_only_stale_watcher(tmp_path: Path) -> None:
     assert replies == []
 
 
+def test_publish_completion_reports_non_zero_exit_code(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=ProjectRegistry({}),
+        manager=JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800),
+        store=store,
+    )
+    replies: list[str] = []
+
+    router.publish_completion(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        exit_code=42,
+        summary="pytest failed in tests/test_main.py",
+        interrupted=False,
+        reply=replies.append,
+    )
+
+    assert replies == ["Codex run exited with code 42.\n\npytest failed in tests/test_main.py"]
+
+
+def test_publish_completion_reports_timeout_without_false_success(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=ProjectRegistry({}),
+        manager=JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800),
+        store=store,
+    )
+    replies: list[str] = []
+
+    router.publish_completion(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        exit_code=124,
+        summary="Codex run timed out before completion.",
+        interrupted=False,
+        reply=replies.append,
+    )
+
+    assert replies == ["Codex run timed out before completion."]
+
+
 def test_control_command_failure_replies_instead_of_raising(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     registry = ProjectRegistry(

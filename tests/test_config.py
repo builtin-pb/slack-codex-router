@@ -98,3 +98,20 @@ def test_project_registry_rejects_missing_project_path(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="does not exist"):
         ProjectRegistry.from_yaml(projects_file)
+
+
+def test_project_registry_rejects_file_path_for_project(tmp_path: Path) -> None:
+    projects_file = tmp_path / "projects.yaml"
+    project_file = tmp_path / "demo.txt"
+    project_file.write_text("not a directory", encoding="utf-8")
+    projects_file.write_text(
+        "projects:\n"
+        "  - channel_id: CFILE\n"
+        "    name: file\n"
+        f"    path: {project_file}\n"
+        "    max_concurrent_jobs: 2\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="is not a directory"):
+        ProjectRegistry.from_yaml(projects_file)

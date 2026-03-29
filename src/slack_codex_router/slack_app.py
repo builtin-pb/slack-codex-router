@@ -136,6 +136,7 @@ class SlackRouter:
         self.publish_completion(
             channel_id=channel_id,
             thread_ts=thread_ts,
+            exit_code=exit_code,
             summary=summary,
             interrupted=interrupted,
             reply=reply,
@@ -146,6 +147,7 @@ class SlackRouter:
         *,
         channel_id: str,
         thread_ts: str,
+        exit_code: int,
         summary: str,
         interrupted: bool,
         reply: ReplyFn,
@@ -156,7 +158,18 @@ class SlackRouter:
             reply("Previous Codex run was interrupted.")
             return
 
-        reply(f"Finished Codex run.\n\n{summary}")
+        if exit_code == 0:
+            header = "Finished Codex run."
+        elif exit_code == 124:
+            header = "Codex run timed out before completion."
+        else:
+            header = f"Codex run exited with code {exit_code}."
+
+        if summary and summary != header:
+            reply(f"{header}\n\n{summary}")
+            return
+
+        reply(header)
 
     def start_completion_watch(
         self,

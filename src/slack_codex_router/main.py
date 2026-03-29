@@ -25,6 +25,7 @@ def main() -> int:
         return 1
 
     config = load_config()
+    config.log_dir.mkdir(parents=True, exist_ok=True)
     registry = ProjectRegistry.from_yaml(config.projects_file)
     store = RouterStore(config.state_db)
     manager = JobManager(
