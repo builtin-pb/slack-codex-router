@@ -95,6 +95,39 @@ class JobManager:
         self._active_by_project.setdefault(project.channel_id, set()).add(thread_ts)
         return active
 
+    def cancel_thread(self, thread_ts: str) -> bool:
+        current = self._active_by_thread.pop(thread_ts, None)
+        if current is None:
+            return False
+
+        self._runner.interrupt(current.run)
+
+        latest_job = self._store.get_latest_job(thread_ts)
+        if latest_job is not None and str(latest_job["state"]) == "running":
+            self._store.finish_job(
+                job_id=int(latest_job["job_id"]),
+                exit_code=130,
+                interrupted=True,
+                summary="",
+            )
+
+        self._store.mark_thread_status(thread_ts, "cancelled")
+
+        session = self._store.get_thread_session(thread_ts)
+        if session is None:
+            return True
+
+        channel_id = str(session["channel_id"])
+        project_threads = self._active_by_project.get(channel_id)
+        if project_threads is None:
+            return True
+
+        project_threads.discard(thread_ts)
+        if not project_threads:
+            self._active_by_project.pop(channel_id, None)
+
+        return True
+
     def wait_for_thread(self, thread_ts: str) -> tuple[int, str, bool]:
         active = self._active_by_thread.get(thread_ts)
         if active is None:

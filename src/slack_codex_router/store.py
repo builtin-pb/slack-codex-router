@@ -122,3 +122,19 @@ class RouterStore:
                 """,
                 (thread_ts,),
             ).fetchone()
+
+    def get_thread_status(self, thread_ts: str) -> str | None:
+        session = self.get_thread_session(thread_ts)
+        if session is None:
+            return None
+        return str(session["status"])
+
+    def get_latest_result_summary(self, thread_ts: str) -> str | None:
+        job = self.get_latest_job(thread_ts)
+        if job is None:
+            return None
+
+        summary = job["last_result_summary"]
+        if not summary:
+            return None
+        return str(summary)

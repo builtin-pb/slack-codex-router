@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from slack_codex_router.commands import RouterCommands
 from slack_codex_router.job_manager import JobManager
 from slack_codex_router.registry import ProjectRegistry
 from slack_codex_router.store import RouterStore
@@ -27,6 +28,7 @@ class SlackRouter:
         self._registry = registry
         self._manager = manager
         self._store = store
+        self._commands = RouterCommands(store=store, manager=manager)
 
     def handle_message(self, event: Mapping[str, object], reply: ReplyFn) -> None:
         if event.get("user") != self._allowed_user_id:
@@ -46,6 +48,18 @@ class SlackRouter:
 
         message_ts = str(event["ts"])
         thread_ts = str(event.get("thread_ts") or message_ts)
+        if prompt == "status":
+            reply(self._commands.status(thread_ts))
+            return
+        if prompt == "cancel":
+            reply(self._commands.cancel(thread_ts))
+            return
+        if prompt == "what changed":
+            reply(self._commands.what_changed(thread_ts))
+            return
+        if prompt == "show diff":
+            reply(self._commands.show_diff(project.path))
+            return
 
         if event.get("thread_ts"):
             session = self._store.get_thread_session(thread_ts)
