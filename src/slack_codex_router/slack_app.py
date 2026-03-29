@@ -74,7 +74,12 @@ class SlackRouter:
                 prompt=prompt,
                 project=project,
             )
-            self.start_completion_watch(channel_id=channel_id, thread_ts=thread_ts, reply=reply)
+            self.start_completion_watch(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                expected_message_ts=message_ts,
+                reply=reply,
+            )
             reply("Interrupted prior run and resumed the Codex session with the latest message.")
             return
 
@@ -85,12 +90,27 @@ class SlackRouter:
             prompt=prompt,
             project=project,
         )
-        self.start_completion_watch(channel_id=channel_id, thread_ts=thread_ts, reply=reply)
+        self.start_completion_watch(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            expected_message_ts=message_ts,
+            reply=reply,
+        )
         reply(f"Started Codex task for project `{project.name}`.")
 
-    def _watch_completion(self, *, channel_id: str, thread_ts: str, reply: ReplyFn) -> None:
+    def _watch_completion(
+        self,
+        *,
+        channel_id: str,
+        thread_ts: str,
+        expected_message_ts: str,
+        reply: ReplyFn,
+    ) -> None:
         try:
-            exit_code, summary, interrupted = self._manager.wait_for_thread(thread_ts)
+            exit_code, summary, interrupted = self._manager.wait_for_thread(
+                thread_ts,
+                expected_message_ts=expected_message_ts,
+            )
         except RuntimeError:
             return
 
@@ -119,12 +139,20 @@ class SlackRouter:
 
         reply(f"Finished Codex run.\n\n{summary}")
 
-    def start_completion_watch(self, *, channel_id: str, thread_ts: str, reply: ReplyFn) -> threading.Thread:
+    def start_completion_watch(
+        self,
+        *,
+        channel_id: str,
+        thread_ts: str,
+        expected_message_ts: str,
+        reply: ReplyFn,
+    ) -> threading.Thread:
         watcher = threading.Thread(
             target=self._watch_completion,
             kwargs={
                 "channel_id": channel_id,
                 "thread_ts": thread_ts,
+                "expected_message_ts": expected_message_ts,
                 "reply": reply,
             },
             daemon=True,

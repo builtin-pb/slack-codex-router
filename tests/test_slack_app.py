@@ -63,10 +63,10 @@ def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Pat
     manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
     router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
     replies: list[str] = []
-    watch_calls: list[tuple[str, str]] = []
+    watch_calls: list[tuple[str, str, str]] = []
 
-    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: watch_calls.append(  # type: ignore[method-assign]
-        (channel_id, thread_ts)
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
     )
 
     router.handle_message(
@@ -91,7 +91,10 @@ def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Pat
 
     session = store.get_thread_session("1710000000.100000")
     assert session["codex_thread_id"] == "session-1"
-    assert watch_calls == [("C123", "1710000000.100000"), ("C123", "1710000000.100000")]
+    assert watch_calls == [
+        ("C123", "1710000000.100000", "1710000000.100000"),
+        ("C123", "1710000000.100000", "1710000001.100000"),
+    ]
     assert replies == [
         "Started Codex task for project `demo`.",
         "Interrupted prior run and resumed the Codex session with the latest message.",
@@ -115,7 +118,7 @@ def test_handle_message_rejects_invalid_requests_and_surfaces_limit_errors(tmp_p
     invalid_replies: list[str] = []
     limit_replies: list[str] = []
 
-    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: None  # type: ignore[method-assign]
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: None  # type: ignore[method-assign]
 
     router.handle_message(
         {
@@ -190,10 +193,10 @@ def test_threaded_reply_without_stored_session_is_rejected(tmp_path: Path) -> No
     manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
     router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
     replies: list[str] = []
-    watch_calls: list[tuple[str, str]] = []
+    watch_calls: list[tuple[str, str, str]] = []
 
-    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: watch_calls.append(  # type: ignore[method-assign]
-        (channel_id, thread_ts)
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
     )
 
     router.handle_message(

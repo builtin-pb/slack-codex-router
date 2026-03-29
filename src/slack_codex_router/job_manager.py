@@ -26,6 +26,17 @@ class JobManager:
     def active_thread_count(self) -> int:
         return len(self._active_by_thread)
 
+    def _assert_current_watcher(self, thread_ts: str, expected_message_ts: str | None) -> None:
+        if expected_message_ts is None:
+            return
+
+        session = self._store.get_thread_session(thread_ts)
+        if session is None:
+            raise RuntimeError(f"No thread session found for thread {thread_ts}")
+
+        if str(session["last_user_message_ts"]) != expected_message_ts:
+            raise RuntimeError(f"Watcher for thread {thread_ts} is obsolete")
+
     def start_new_thread(
         self,
         *,
@@ -66,9 +77,19 @@ class JobManager:
         prompt: str,
         project: ProjectConfig,
     ) -> ActiveRun:
+        session = self._store.get_thread_session(thread_ts)
+        if session is None:
+            raise RuntimeError(f"No thread session found for thread {thread_ts}")
+
+        session_id = str(session["codex_thread_id"])
+        self._store.mark_thread_status(
+            thread_ts,
+            str(session["status"]),
+            last_user_message_ts=user_message_ts,
+        )
+
         current = self._active_by_thread.get(thread_ts)
         if current is not None:
-            self._active_by_thread.pop(thread_ts, None)
             self._runner.interrupt(current.run)
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is not None and str(latest_job["state"]) == "running":
@@ -79,11 +100,6 @@ class JobManager:
                     summary="",
                 )
 
-        session = self._store.get_thread_session(thread_ts)
-        if session is None:
-            raise RuntimeError(f"No thread session found for thread {thread_ts}")
-
-        session_id = str(session["codex_thread_id"])
         run = self._runner.resume(project.path, session_id, prompt)
         self._store.upsert_thread_session(
             thread_ts=thread_ts,
@@ -110,7 +126,13 @@ class JobManager:
 
         return True
 
-    def wait_for_thread(self, thread_ts: str) -> tuple[int, str, bool]:
+    def wait_for_thread(
+        self,
+        thread_ts: str,
+        *,
+        expected_message_ts: str | None = None,
+    ) -> tuple[int, str, bool]:
+        self._assert_current_watcher(thread_ts, expected_message_ts)
         active = self._active_by_thread.get(thread_ts)
         if active is None:
             latest_job = self._store.get_latest_job(thread_ts)
@@ -127,6 +149,7 @@ class JobManager:
         except TypeError:
             exit_code, summary = self._runner.wait(active.run)
 
+        self._assert_current_watcher(thread_ts, expected_message_ts)
         if self._active_by_thread.get(thread_ts) is not active:
             raise RuntimeError(f"Thread {thread_ts} is no longer the active run")
 

@@ -64,6 +64,12 @@ class RecordingRunner:
         return (0, run.summary)
 
 
+def _watch_kwargs(watch_request: dict[str, object], reply) -> dict[str, object]:
+    kwargs = dict(watch_request)
+    kwargs["reply"] = reply
+    return kwargs
+
+
 def test_new_thread_then_follow_up_reuses_same_session_and_cleans_up_after_completion(
     tmp_path: Path,
 ) -> None:
@@ -86,8 +92,13 @@ def test_new_thread_then_follow_up_reuses_same_session_and_cleans_up_after_compl
 
     original_start_completion_watch = router.start_completion_watch
 
-    def record_completion_watch(*, channel_id: str, thread_ts: str, reply):
-        watcher = original_start_completion_watch(channel_id=channel_id, thread_ts=thread_ts, reply=reply)
+    def record_completion_watch(*, channel_id: str, thread_ts: str, expected_message_ts: str, reply):
+        watcher = original_start_completion_watch(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            expected_message_ts=expected_message_ts,
+            reply=reply,
+        )
         watchers.append(watcher)
         return watcher
 
@@ -148,3 +159,85 @@ def test_new_thread_then_follow_up_reuses_same_session_and_cleans_up_after_compl
         "Interrupted prior run and resumed the Codex session with the latest message.",
         "Finished Codex run.\n\nUpdated final summary from Codex",
     ]
+
+
+def test_late_stale_watcher_exits_quietly_after_follow_up_is_accepted(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    runner = RecordingRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+    watch_requests: list[dict[str, object]] = []
+
+    def record_completion_watch(**kwargs):
+        watch_requests.append(dict(kwargs))
+        return None
+
+    router.start_completion_watch = record_completion_watch  # type: ignore[method-assign]
+
+    router.handle_message(
+        {"user": "U123", "channel": "C123", "ts": "1710000000.100000", "text": "inspect repo"},
+        replies.append,
+    )
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000001.100000",
+            "thread_ts": "1710000000.100000",
+            "text": "only touch docs",
+        },
+        replies.append,
+    )
+
+    stale_replies: list[str] = []
+    stale_watcher = threading.Thread(
+        target=router._watch_completion,
+        kwargs=_watch_kwargs(watch_requests[0], stale_replies.append),
+        daemon=True,
+    )
+    stale_watcher.start()
+    stale_watcher.join(timeout=0.2)
+
+    assert not stale_watcher.is_alive()
+    assert stale_replies == []
+    assert not runner.runs[1].wait_started.is_set()
+
+    completion_replies: list[str] = []
+    completion_watcher = threading.Thread(
+        target=router._watch_completion,
+        kwargs=_watch_kwargs(watch_requests[1], completion_replies.append),
+        daemon=True,
+    )
+    completion_watcher.start()
+    assert runner.runs[1].wait_started.wait(timeout=1)
+
+    runner.runs[1].release_wait.set()
+    completion_watcher.join(timeout=1)
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert not completion_watcher.is_alive()
+    assert replies == [
+        "Started Codex task for project `demo`.",
+        "Interrupted prior run and resumed the Codex session with the latest message.",
+    ]
+    assert completion_replies == ["Finished Codex run.\n\nUpdated final summary from Codex"]
+    assert manager.active_thread_count() == 0
+    assert store.list_active_jobs() == []
+    assert session is not None
+    assert session["status"] == "finished"
+    assert latest_job is not None
+    assert latest_job["pid"] == 1002
+    assert latest_job["state"] == "finished"
