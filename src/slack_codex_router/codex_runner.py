@@ -49,10 +49,12 @@ class CodexRunner:
     def __init__(
         self,
         *,
-        output_file_name: str = ".codex-last.txt",
-        log_file_name: str = ".codex-run.log",
+        artifact_dir: str = "logs/codex-runs",
+        output_file_name: str = "codex-last.txt",
+        log_file_name: str = "codex-run.log",
         thread_id_timeout_seconds: float = 5.0,
     ) -> None:
+        self._artifact_dir = Path(artifact_dir)
         self._output_file_name = output_file_name
         self._log_file_name = log_file_name
         self._thread_id_timeout_seconds = thread_id_timeout_seconds
@@ -165,9 +167,10 @@ class CodexRunner:
 
     def _allocate_run_paths(self, project_path: Path) -> tuple[Path, Path]:
         run_id = uuid4().hex
+        artifact_root = project_path / self._artifact_dir
         return (
-            project_path / self._build_artifact_name(self._output_file_name, run_id),
-            project_path / self._build_artifact_name(self._log_file_name, run_id),
+            artifact_root / self._build_artifact_name(self._output_file_name, run_id),
+            artifact_root / self._build_artifact_name(self._log_file_name, run_id),
         )
 
     def _spawn(self, project_path: Path, command: list[str], log_path: Path) -> subprocess.Popen[str]:

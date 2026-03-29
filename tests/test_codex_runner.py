@@ -74,8 +74,8 @@ def test_start_stops_spawned_child_when_thread_id_discovery_fails(
     stopped_run, timeout_seconds = stop_calls[0]
     assert stopped_run.pid == process.pid
     assert stopped_run.process is process
-    assert stopped_run.output_file.parent == tmp_path
-    assert stopped_run.log_path.parent == tmp_path
+    assert stopped_run.output_file.parent == tmp_path / "logs" / "codex-runs"
+    assert stopped_run.log_path.parent == tmp_path / "logs" / "codex-runs"
     assert timeout_seconds == 5.0
 
 
@@ -103,6 +103,8 @@ def test_start_allocates_unique_output_and_log_paths_per_run(
     assert first.log_path != second.log_path
     assert seen_commands[0][4] != seen_commands[1][4]
     assert seen_logs[0] != seen_logs[1]
+    assert first.output_file.parent == tmp_path / "logs" / "codex-runs"
+    assert first.log_path.parent == tmp_path / "logs" / "codex-runs"
 
 
 class FakeTimeoutProcess:
