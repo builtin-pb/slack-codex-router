@@ -23,6 +23,9 @@ class JobManager:
         self._active_by_thread: dict[str, ActiveRun] = {}
         self._active_by_project: dict[str, set[str]] = {}
 
+    def active_thread_count(self) -> int:
+        return len(self._active_by_thread)
+
     def start_new_thread(
         self,
         *,
@@ -163,7 +166,7 @@ class JobManager:
         status = "cancelled" if cancelled else ("interrupted" if interrupted else "finished")
         self._store.mark_thread_status(thread_ts, status)
 
-        active = self._active_by_thread.pop(thread_ts, None)
+        self._active_by_thread.pop(thread_ts, None)
         channel_id = None
         session = self._store.get_thread_session(thread_ts)
         if session is not None:

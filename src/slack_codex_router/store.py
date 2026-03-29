@@ -123,6 +123,18 @@ class RouterStore:
                 (thread_ts,),
             ).fetchone()
 
+    def list_active_jobs(self) -> list[sqlite3.Row]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM jobs
+                WHERE state = 'running'
+                ORDER BY job_id ASC
+                """
+            ).fetchall()
+        return list(rows)
+
     def get_thread_status(self, thread_ts: str) -> str | None:
         session = self.get_thread_session(thread_ts)
         if session is None:
