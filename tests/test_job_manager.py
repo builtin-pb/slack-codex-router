@@ -105,6 +105,24 @@ class StopFailureRunner(FakeRunner):
         return (0, "Original run completed")
 
 
+class BlockingStopFailureRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_started = threading.Event()
+        self.release_stop = threading.Event()
+        self.wait_calls: list[tuple[FakeRun, int | None]] = []
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        del run, timeout_seconds
+        self.stop_started.set()
+        self.release_stop.wait(timeout=1)
+        return False
+
+    def wait(self, run: FakeRun, timeout_seconds: int | None = None) -> tuple[int, str]:
+        self.wait_calls.append((run, timeout_seconds))
+        return (0, "Original run completed after transition")
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -205,6 +223,118 @@ def test_follow_up_stop_failure_keeps_original_run_and_watcher_authoritative(tmp
 
     assert result == (0, "Original run completed", False)
     assert len(runner.wait_calls) == 1
+
+
+def test_authoritative_watcher_waits_through_transition_when_stop_fails(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = BlockingStopFailureRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    follow_up_error: dict[str, Exception] = {}
+    watcher_result: dict[str, tuple[int, str, bool]] = {}
+    watcher_error: dict[str, Exception] = {}
+
+    def follow_up() -> None:
+        try:
+            manager.handle_follow_up(
+                channel_id="C123",
+                thread_ts="1710000000.100000",
+                user_message_ts="1710000001.100000",
+                prompt="latest request",
+                project=project,
+            )
+        except Exception as exc:
+            follow_up_error["value"] = exc
+
+    def watch_original() -> None:
+        try:
+            watcher_result["value"] = manager.wait_for_thread(
+                "1710000000.100000",
+                expected_message_ts="1710000000.100000",
+            )
+        except Exception as exc:
+            watcher_error["value"] = exc
+
+    follow_up_thread = threading.Thread(target=follow_up)
+    follow_up_thread.start()
+    assert runner.stop_started.wait(timeout=1)
+
+    watcher_thread = threading.Thread(target=watch_original)
+    watcher_thread.start()
+    watcher_thread.join(timeout=0.05)
+    assert watcher_thread.is_alive()
+
+    runner.release_stop.set()
+    follow_up_thread.join(timeout=1)
+    watcher_thread.join(timeout=1)
+
+    assert isinstance(follow_up_error["value"], RuntimeError)
+    assert "transitioning" not in str(watcher_error.get("value", ""))
+    assert "value" not in watcher_error
+    assert watcher_result["value"] == (0, "Original run completed after transition", False)
+    assert len(runner.wait_calls) == 1
+
+
+def test_cancel_thread_during_transition_returns_false_without_crashing(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = BlockingStopFailureRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    follow_up_error: dict[str, Exception] = {}
+
+    def follow_up() -> None:
+        try:
+            manager.handle_follow_up(
+                channel_id="C123",
+                thread_ts="1710000000.100000",
+                user_message_ts="1710000001.100000",
+                prompt="latest request",
+                project=project,
+            )
+        except Exception as exc:
+            follow_up_error["value"] = exc
+
+    follow_up_thread = threading.Thread(target=follow_up)
+    follow_up_thread.start()
+    assert runner.stop_started.wait(timeout=1)
+
+    cancel_error: dict[str, Exception] = {}
+    cancel_result: dict[str, bool] = {}
+
+    def cancel_during_transition() -> None:
+        try:
+            cancel_result["value"] = manager.cancel_thread("1710000000.100000")
+        except Exception as exc:
+            cancel_error["value"] = exc
+
+    cancel_thread = threading.Thread(target=cancel_during_transition)
+    cancel_thread.start()
+    cancel_thread.join(timeout=1)
+
+    runner.release_stop.set()
+    follow_up_thread.join(timeout=1)
+
+    assert "value" not in cancel_error
+    assert cancel_result["value"] is False
+    assert isinstance(follow_up_error["value"], RuntimeError)
 
 
 def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path) -> None:

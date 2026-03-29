@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from slack_codex_router.registry import ProjectConfig
@@ -58,6 +59,26 @@ class JobManager:
         project_threads.discard(thread_ts)
         if not project_threads:
             self._active_by_project.pop(channel_id, None)
+
+    def _resolve_active_for_wait(
+        self,
+        thread_ts: str,
+        *,
+        expected_message_ts: str | None,
+    ) -> ActiveRun | None:
+        deadline = time.monotonic() + self._follow_up_stop_timeout_seconds
+        while True:
+            active = self._active_by_thread.get(thread_ts)
+            if active is None:
+                return None
+            if isinstance(active, ActiveRun):
+                return active
+            if expected_message_ts is None:
+                raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
+            self._assert_current_watcher(thread_ts, expected_message_ts)
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"Timed out waiting for thread {thread_ts} transition to resolve")
+            time.sleep(0.01)
 
     def start_new_thread(
         self,
@@ -160,6 +181,8 @@ class JobManager:
         current = self._active_by_thread.get(thread_ts)
         if current is None:
             return False
+        if not isinstance(current, ActiveRun):
+            return False
 
         self._runner.interrupt(current.run)
 
@@ -174,9 +197,7 @@ class JobManager:
         expected_message_ts: str | None = None,
     ) -> tuple[int, str, bool]:
         self._assert_current_watcher(thread_ts, expected_message_ts)
-        active = self._active_by_thread.get(thread_ts)
-        if active is not None and not isinstance(active, ActiveRun):
-            raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
+        active = self._resolve_active_for_wait(thread_ts, expected_message_ts=expected_message_ts)
         if active is None:
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is None:
