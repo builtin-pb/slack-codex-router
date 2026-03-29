@@ -36,6 +36,41 @@ def test_build_resume_command_places_session_id_before_prompt(tmp_path: Path) ->
     ]
 
 
+class FakeLaunchProcess:
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self.stdout = io.StringIO("")
+
+    def poll(self) -> int | None:
+        return None
+
+
+def test_start_allocates_unique_output_and_log_paths_per_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = CodexRunner()
+    seen_commands: list[list[str]] = []
+    seen_logs: list[Path] = []
+    next_pid = iter([1111, 2222])
+
+    def fake_spawn(project_path: Path, command: list[str], log_path: Path) -> FakeLaunchProcess:
+        seen_commands.append(command)
+        seen_logs.append(log_path)
+        return FakeLaunchProcess(next(next_pid))
+
+    monkeypatch.setattr(runner, "_spawn", fake_spawn)
+    monkeypatch.setattr(runner, "_wait_for_thread_id", lambda log_path, process, default_thread_id=None: f"thread-{process.pid}")
+
+    first = runner.start(tmp_path, "first prompt")
+    second = runner.start(tmp_path, "second prompt")
+
+    assert first.output_file != second.output_file
+    assert first.log_path != second.log_path
+    assert seen_commands[0][4] != seen_commands[1][4]
+    assert seen_logs[0] != seen_logs[1]
+
+
 class FakeTimeoutProcess:
     def __init__(self) -> None:
         self.pid = 4321
@@ -82,7 +117,7 @@ def test_wait_timeout_terminates_process_before_return_and_drains_log(
         log_path=log_path,
     )
 
-    monotonic_values = iter([0.0, 1.0])
+    monotonic_values = iter([0.0, 1.0, 1.0, 1.0, 1.0])
     monkeypatch.setattr("slack_codex_router.codex_runner.time.monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(runner, "_read_ready_lines", lambda stream, timeout_seconds: [])
 

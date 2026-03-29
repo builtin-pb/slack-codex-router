@@ -74,6 +74,22 @@ class FailingResumeRunner(FakeRunner):
         raise RuntimeError("resume failed")
 
 
+class StopBeforeResumeRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_calls: list[tuple[FakeRun, float]] = []
+        self.resume_seen_stopped = False
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        run.interrupted = True
+        self.stop_calls.append((run, timeout_seconds))
+        return True
+
+    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+        self.resume_seen_stopped = self.current.interrupted
+        return super().resume(project_path, session_id, prompt)
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -102,6 +118,36 @@ def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path)
     assert original_run.run.interrupted is True
     assert latest_job["pid"] == 1002
     assert session["codex_thread_id"] == "session-1"
+
+
+def test_follow_up_waits_for_previous_run_to_stop_before_resume(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = StopBeforeResumeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    original_run = manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    manager.handle_follow_up(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000001.100000",
+        prompt="latest request",
+        project=project,
+    )
+
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert runner.stop_calls == [(original_run.run, 5.0)]
+    assert runner.resume_seen_stopped is True
+    assert latest_job is not None
+    assert latest_job["pid"] == 1002
 
 
 def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path) -> None:

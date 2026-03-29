@@ -15,11 +15,20 @@ class ActiveRun:
 
 
 class JobManager:
-    def __init__(self, *, store: RouterStore, runner, global_limit: int, run_timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        *,
+        store: RouterStore,
+        runner,
+        global_limit: int,
+        run_timeout_seconds: int,
+        follow_up_stop_timeout_seconds: float = 5.0,
+    ) -> None:
         self._store = store
         self._runner = runner
         self._global_limit = global_limit
         self._run_timeout_seconds = run_timeout_seconds
+        self._follow_up_stop_timeout_seconds = follow_up_stop_timeout_seconds
         self._active_by_thread: dict[str, ActiveRun] = {}
         self._active_by_project: dict[str, set[str]] = {}
 
@@ -100,7 +109,13 @@ class JobManager:
 
         current = self._active_by_thread.get(thread_ts)
         if current is not None:
-            self._runner.interrupt(current.run)
+            stop_run = getattr(self._runner, "stop", None)
+            if stop_run is not None:
+                stopped = stop_run(current.run, self._follow_up_stop_timeout_seconds)
+                if not stopped:
+                    raise RuntimeError(f"Timed out stopping active Codex run for thread {thread_ts}")
+            else:
+                self._runner.interrupt(current.run)
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is not None and str(latest_job["state"]) == "running":
                 self._store.finish_job(

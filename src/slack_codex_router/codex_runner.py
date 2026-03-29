@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from io import TextIOBase
 from pathlib import Path
+from uuid import uuid4
 
 from slack_codex_router.codex_events import extract_thread_id, parse_event_lines
 
@@ -57,13 +58,11 @@ class CodexRunner:
         self._thread_id_timeout_seconds = thread_id_timeout_seconds
 
     def start(self, project_path: Path, prompt: str) -> CodexRun:
-        output_file = project_path / self._output_file_name
-        log_path = project_path / self._log_file_name
+        output_file, log_path = self._allocate_run_paths(project_path)
         return self._launch(project_path, build_exec_command(prompt, output_file), output_file, log_path)
 
     def resume(self, project_path: Path, session_id: str, prompt: str) -> CodexRun:
-        output_file = project_path / self._output_file_name
-        log_path = project_path / self._log_file_name
+        output_file, log_path = self._allocate_run_paths(project_path)
         return self._launch(
             project_path,
             build_resume_command(session_id, prompt, output_file),
@@ -79,6 +78,37 @@ class CodexRunner:
             run.process.send_signal(signal.SIGINT)
         except ProcessLookupError:
             return
+
+    def stop(self, run: CodexRun, timeout_seconds: float = 5.0) -> bool:
+        if run.process.poll() is not None:
+            self._drain_remaining_output(run)
+            return True
+
+        deadline = time.monotonic() + max(timeout_seconds, 0.0)
+        self.interrupt(run)
+        if self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline)):
+            self._drain_remaining_output(run)
+            return True
+
+        try:
+            run.process.terminate()
+        except ProcessLookupError:
+            self._drain_remaining_output(run)
+            return True
+
+        if self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline)):
+            self._drain_remaining_output(run)
+            return True
+
+        try:
+            run.process.kill()
+        except ProcessLookupError:
+            self._drain_remaining_output(run)
+            return True
+
+        stopped = self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline))
+        self._drain_remaining_output(run)
+        return stopped or run.process.poll() is not None
 
     def wait(self, run: CodexRun, timeout_seconds: int) -> tuple[int, str]:
         deadline = time.monotonic() + timeout_seconds
@@ -119,6 +149,13 @@ class CodexRunner:
             process=process,
             output_file=output_file,
             log_path=log_path,
+        )
+
+    def _allocate_run_paths(self, project_path: Path) -> tuple[Path, Path]:
+        run_id = uuid4().hex
+        return (
+            project_path / self._build_artifact_name(self._output_file_name, run_id),
+            project_path / self._build_artifact_name(self._log_file_name, run_id),
         )
 
     def _spawn(self, project_path: Path, command: list[str], log_path: Path) -> subprocess.Popen[str]:
@@ -184,19 +221,7 @@ class CodexRunner:
             handle.writelines(lines)
 
     def _stop_timed_out_process(self, run: CodexRun) -> None:
-        self.interrupt(run)
-        if self._wait_for_exit(run.process, timeout_seconds=1):
-            return
-
-        run.process.terminate()
-        if self._wait_for_exit(run.process, timeout_seconds=1):
-            return
-
-        run.process.kill()
-        try:
-            run.process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            run.process.wait()
+        self.stop(run, timeout_seconds=3.0)
 
     def _drain_remaining_output(self, run: CodexRun) -> None:
         stdout = run.process.stdout
@@ -218,6 +243,15 @@ class CodexRunner:
         except subprocess.TimeoutExpired:
             return False
         return True
+
+    def _remaining_timeout(self, deadline: float) -> float:
+        return max(0.0, deadline - time.monotonic())
+
+    def _build_artifact_name(self, base_name: str, run_id: str) -> str:
+        path = Path(base_name)
+        suffix = "".join(path.suffixes)
+        stem = base_name[: -len(suffix)] if suffix else base_name
+        return f"{stem}-{run_id}{suffix}"
 
     def _read_ready_lines(self, stream: TextIOBase, *, timeout_seconds: float) -> list[str]:
         lines: list[str] = []
