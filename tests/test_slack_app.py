@@ -84,3 +84,46 @@ def test_publish_completion_posts_summary_back_into_thread(tmp_path: Path) -> No
     )
 
     assert replies[-1] == "Finished Codex run.\n\nFinal summary from Codex"
+
+
+def test_wait_for_thread_finalizes_latest_job_and_thread_status(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=1,
+            )
+        }
+    )
+    manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        lambda _: None,
+    )
+
+    result = manager.wait_for_thread("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+    session = store.get_thread_session("1710000000.100000")
+
+    assert result == (0, "Final summary from Codex", False)
+    assert latest_job["state"] == "finished"
+    assert latest_job["last_result_summary"] == "Final summary from Codex"
+    assert session["status"] == "finished"
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000002.100000",
+        user_message_ts="1710000002.100000",
+        prompt="next task",
+        project=registry.by_channel("C123"),
+    )

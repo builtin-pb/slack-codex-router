@@ -116,6 +116,12 @@ class JobManager:
             raise RuntimeError(f"Thread {thread_ts} is no longer the active run")
 
         interrupted = False
+        self.complete_thread(
+            thread_ts,
+            exit_code=exit_code,
+            summary=summary,
+            interrupted=interrupted,
+        )
         return (exit_code, summary, interrupted)
 
     def complete_thread(

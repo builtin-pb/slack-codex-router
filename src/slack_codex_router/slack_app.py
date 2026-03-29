@@ -69,12 +69,6 @@ class SlackRouter:
         except RuntimeError:
             return
 
-        self._manager.complete_thread(
-            thread_ts,
-            exit_code=exit_code,
-            summary=summary,
-            interrupted=interrupted,
-        )
         self.publish_completion(
             channel_id=channel_id,
             thread_ts=thread_ts,
