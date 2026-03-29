@@ -37,6 +37,16 @@ class JobManager:
         if str(session["last_user_message_ts"]) != expected_message_ts:
             raise RuntimeError(f"Watcher for thread {thread_ts} is obsolete")
 
+    def _remove_active_tracking(self, thread_ts: str, channel_id: str) -> None:
+        self._active_by_thread.pop(thread_ts, None)
+        project_threads = self._active_by_project.get(channel_id)
+        if project_threads is None:
+            return
+
+        project_threads.discard(thread_ts)
+        if not project_threads:
+            self._active_by_project.pop(channel_id, None)
+
     def start_new_thread(
         self,
         *,
@@ -100,15 +110,20 @@ class JobManager:
                     summary="",
                 )
 
-        run = self._runner.resume(project.path, session_id, prompt)
-        self._store.upsert_thread_session(
-            thread_ts=thread_ts,
-            channel_id=channel_id,
-            codex_thread_id=session_id,
-            status="running",
-            last_user_message_ts=user_message_ts,
-        )
-        self._store.start_job(thread_ts=thread_ts, pid=run.pid, log_path=str(run.log_path))
+        try:
+            run = self._runner.resume(project.path, session_id, prompt)
+            self._store.upsert_thread_session(
+                thread_ts=thread_ts,
+                channel_id=channel_id,
+                codex_thread_id=session_id,
+                status="running",
+                last_user_message_ts=user_message_ts,
+            )
+            self._store.start_job(thread_ts=thread_ts, pid=run.pid, log_path=str(run.log_path))
+        except Exception:
+            self._remove_active_tracking(thread_ts, project.channel_id)
+            self._store.mark_thread_status(thread_ts, "interrupted")
+            raise
 
         active = ActiveRun(thread_ts=thread_ts, session_id=session_id, pid=run.pid, run=run)
         self._active_by_thread[thread_ts] = active
@@ -190,19 +205,8 @@ class JobManager:
         status = "cancelled" if cancelled else ("interrupted" if interrupted else "finished")
         self._store.mark_thread_status(thread_ts, status)
 
-        self._active_by_thread.pop(thread_ts, None)
-        channel_id = None
         session = self._store.get_thread_session(thread_ts)
-        if session is not None:
-            channel_id = str(session["channel_id"])
-
-        if channel_id is None:
+        if session is None:
             return
 
-        project_threads = self._active_by_project.get(channel_id)
-        if project_threads is None:
-            return
-
-        project_threads.discard(thread_ts)
-        if not project_threads:
-            self._active_by_project.pop(channel_id, None)
+        self._remove_active_tracking(thread_ts, str(session["channel_id"]))

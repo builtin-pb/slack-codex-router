@@ -68,6 +68,12 @@ class BlockingRunner(FakeRunner):
         return (130, "Cancelled run summary")
 
 
+class FailingResumeRunner(FakeRunner):
+    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+        self.resume_calls.append((project_path, session_id, prompt))
+        raise RuntimeError("resume failed")
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -181,6 +187,50 @@ def test_cancel_thread_preserves_cancelled_state_until_wait_for_thread_finishes(
     assert latest_job is not None
     assert latest_job["interrupted"] == 1
     assert len(runner.wait_calls) == 1
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000002.100000",
+        user_message_ts="1710000002.100000",
+        prompt="third task",
+        project=project,
+    )
+
+
+def test_follow_up_resume_failure_cleans_up_active_tracking_and_frees_capacity(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = FailingResumeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=1)
+
+    original_run = manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    with pytest.raises(RuntimeError, match="resume failed"):
+        manager.handle_follow_up(
+            channel_id="C123",
+            thread_ts="1710000000.100000",
+            user_message_ts="1710000001.100000",
+            prompt="latest request",
+            project=project,
+        )
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert runner.resume_calls == [(tmp_path, "session-1", "latest request")]
+    assert original_run.run.interrupted is True
+    assert manager.active_thread_count() == 0
+    assert session is not None
+    assert session["status"] == "interrupted"
+    assert latest_job is not None
+    assert latest_job["state"] == "interrupted"
+    assert latest_job["interrupted"] == 1
 
     manager.start_new_thread(
         channel_id="C123",
