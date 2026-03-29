@@ -76,6 +76,17 @@ class RouterStore:
                 (thread_ts,),
             ).fetchone()
 
+    def mark_thread_status(self, thread_ts: str, status: str, last_user_message_ts: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE thread_sessions
+                SET status = ?, last_user_message_ts = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE thread_ts = ?
+                """,
+                (status, last_user_message_ts, thread_ts),
+            )
+
     def start_job(self, *, thread_ts: str, pid: int, log_path: str) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
