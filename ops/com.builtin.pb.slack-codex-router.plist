@@ -4,16 +4,18 @@
 <dict>
   <key>Label</key>
   <string>com.builtin.pb.slack-codex-router</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/builtin.pb/Desktop/Template/scripts/run-router.sh</string>
-  </array>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-c</string>
+		<string>cd /Users/builtin.pb/Desktop/Template &amp;&amp; export PATH=/opt/homebrew/bin:/Users/builtin.pb/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin &amp;&amp; export PYTHONPATH=/Users/builtin.pb/Desktop/Template/src${PYTHONPATH:+:$PYTHONPATH} &amp;&amp; exec /Users/builtin.pb/Desktop/Template/.venv/bin/python -m slack_codex_router.main run</string>
+	</array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
-  <key>WorkingDirectory</key>
-  <string>/Users/builtin.pb/Desktop/Template</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/builtin.pb</string>
   <key>StandardOutPath</key>
   <string>/Users/builtin.pb/Desktop/Template/logs/launchd.stdout.log</string>
   <key>StandardErrorPath</key>

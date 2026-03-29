@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 state/
 logs/
+config/projects.yaml
+.codex-last-*.txt
+.codex-run-*.log

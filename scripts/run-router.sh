@@ -35,6 +35,7 @@ fi
 
 load_env_file .env
 
-export PATH="/Users/builtin.pb/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/Users/builtin.pb/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PYTHONPATH="/Users/builtin.pb/Desktop/Template/src${PYTHONPATH:+:$PYTHONPATH}"
 
-exec uv run python -m slack_codex_router.main run
+exec /Users/builtin.pb/Desktop/Template/.venv/bin/python -m slack_codex_router.main run
