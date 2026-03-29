@@ -90,6 +90,21 @@ class StopBeforeResumeRunner(FakeRunner):
         return super().resume(project_path, session_id, prompt)
 
 
+class StopFailureRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stop_calls: list[tuple[FakeRun, float]] = []
+        self.wait_calls: list[tuple[FakeRun, int | None]] = []
+
+    def stop(self, run: FakeRun, timeout_seconds: float) -> bool:
+        self.stop_calls.append((run, timeout_seconds))
+        return False
+
+    def wait(self, run: FakeRun, timeout_seconds: int | None = None) -> tuple[int, str]:
+        self.wait_calls.append((run, timeout_seconds))
+        return (0, "Original run completed")
+
+
 def test_follow_up_interrupts_active_run_and_reuses_same_session(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     runner = FakeRunner()
@@ -148,6 +163,48 @@ def test_follow_up_waits_for_previous_run_to_stop_before_resume(tmp_path: Path) 
     assert runner.resume_seen_stopped is True
     assert latest_job is not None
     assert latest_job["pid"] == 1002
+
+
+def test_follow_up_stop_failure_keeps_original_run_and_watcher_authoritative(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    runner = StopFailureRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    project = ProjectConfig(channel_id="C123", name="demo", path=tmp_path, max_concurrent_jobs=2)
+
+    manager.start_new_thread(
+        channel_id="C123",
+        thread_ts="1710000000.100000",
+        user_message_ts="1710000000.100000",
+        prompt="initial request",
+        project=project,
+    )
+
+    with pytest.raises(RuntimeError, match="Timed out stopping active Codex run"):
+        manager.handle_follow_up(
+            channel_id="C123",
+            thread_ts="1710000000.100000",
+            user_message_ts="1710000001.100000",
+            prompt="latest request",
+            project=project,
+        )
+
+    session = store.get_thread_session("1710000000.100000")
+    latest_job = store.get_latest_job("1710000000.100000")
+
+    assert runner.resume_calls == []
+    assert runner.stop_calls[0][1] == 5.0
+    assert manager.active_thread_count() == 1
+    assert session is not None
+    assert session["status"] == "running"
+    assert session["last_user_message_ts"] == "1710000000.100000"
+    assert latest_job is not None
+    assert latest_job["state"] == "running"
+    assert latest_job["interrupted"] == 0
+
+    result = manager.wait_for_thread("1710000000.100000", expected_message_ts="1710000000.100000")
+
+    assert result == (0, "Original run completed", False)
+    assert len(runner.wait_calls) == 1
 
 
 def test_project_concurrency_limit_blocks_second_top_level_thread(tmp_path: Path) -> None:

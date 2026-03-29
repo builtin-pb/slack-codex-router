@@ -6,6 +6,9 @@ from slack_codex_router.registry import ProjectConfig
 from slack_codex_router.store import RouterStore
 
 
+_TRANSITIONING = object()
+
+
 @dataclass
 class ActiveRun:
     thread_ts: str
@@ -29,7 +32,7 @@ class JobManager:
         self._global_limit = global_limit
         self._run_timeout_seconds = run_timeout_seconds
         self._follow_up_stop_timeout_seconds = follow_up_stop_timeout_seconds
-        self._active_by_thread: dict[str, ActiveRun] = {}
+        self._active_by_thread: dict[str, ActiveRun | object] = {}
         self._active_by_project: dict[str, set[str]] = {}
 
     def active_thread_count(self) -> int:
@@ -101,21 +104,23 @@ class JobManager:
             raise RuntimeError(f"No thread session found for thread {thread_ts}")
 
         session_id = str(session["codex_thread_id"])
-        self._store.mark_thread_status(
-            thread_ts,
-            str(session["status"]),
-            last_user_message_ts=user_message_ts,
-        )
-
         current = self._active_by_thread.get(thread_ts)
         if current is not None:
+            if not isinstance(current, ActiveRun):
+                raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
+            self._active_by_thread[thread_ts] = _TRANSITIONING
             stop_run = getattr(self._runner, "stop", None)
-            if stop_run is not None:
-                stopped = stop_run(current.run, self._follow_up_stop_timeout_seconds)
-                if not stopped:
-                    raise RuntimeError(f"Timed out stopping active Codex run for thread {thread_ts}")
-            else:
-                self._runner.interrupt(current.run)
+            try:
+                if stop_run is not None:
+                    stopped = stop_run(current.run, self._follow_up_stop_timeout_seconds)
+                    if not stopped:
+                        self._active_by_thread[thread_ts] = current
+                        raise RuntimeError(f"Timed out stopping active Codex run for thread {thread_ts}")
+                else:
+                    self._runner.interrupt(current.run)
+            except Exception:
+                self._active_by_thread[thread_ts] = current
+                raise
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is not None and str(latest_job["state"]) == "running":
                 self._store.finish_job(
@@ -124,6 +129,12 @@ class JobManager:
                     interrupted=True,
                     summary="",
                 )
+
+        self._store.mark_thread_status(
+            thread_ts,
+            str(session["status"]),
+            last_user_message_ts=user_message_ts,
+        )
 
         try:
             run = self._runner.resume(project.path, session_id, prompt)
@@ -164,6 +175,8 @@ class JobManager:
     ) -> tuple[int, str, bool]:
         self._assert_current_watcher(thread_ts, expected_message_ts)
         active = self._active_by_thread.get(thread_ts)
+        if active is not None and not isinstance(active, ActiveRun):
+            raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
         if active is None:
             latest_job = self._store.get_latest_job(thread_ts)
             if latest_job is None:

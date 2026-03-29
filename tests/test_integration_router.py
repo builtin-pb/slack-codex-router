@@ -54,6 +54,11 @@ class RecordingRunner:
         run.interrupted = True
         run.release_wait.set()
 
+    def stop(self, run, timeout_seconds: float) -> bool:
+        del timeout_seconds
+        self.interrupt(run)
+        return True
+
     def wait(self, run, timeout_seconds: int | None = None) -> tuple[int, str]:
         del timeout_seconds
         run.wait_started.set()

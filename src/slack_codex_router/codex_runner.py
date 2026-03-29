@@ -93,8 +93,7 @@ class CodexRunner:
         try:
             run.process.terminate()
         except ProcessLookupError:
-            self._drain_remaining_output(run)
-            return True
+            return self._drain_if_exited(run)
 
         if self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline)):
             self._drain_remaining_output(run)
@@ -103,12 +102,12 @@ class CodexRunner:
         try:
             run.process.kill()
         except ProcessLookupError:
+            return self._drain_if_exited(run)
+
+        if self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline)):
             self._drain_remaining_output(run)
             return True
-
-        stopped = self._wait_for_exit(run.process, timeout_seconds=self._remaining_timeout(deadline))
-        self._drain_remaining_output(run)
-        return stopped or run.process.poll() is not None
+        return False
 
     def wait(self, run: CodexRun, timeout_seconds: int) -> tuple[int, str]:
         deadline = time.monotonic() + timeout_seconds
@@ -122,7 +121,6 @@ class CodexRunner:
 
             if time.monotonic() >= deadline:
                 self._stop_timed_out_process(run)
-                self._drain_remaining_output(run)
                 return (124, "Codex run timed out before completion.")
 
         self._drain_remaining_output(run)
@@ -220,8 +218,8 @@ class CodexRunner:
         with log_path.open("a", encoding="utf-8") as handle:
             handle.writelines(lines)
 
-    def _stop_timed_out_process(self, run: CodexRun) -> None:
-        self.stop(run, timeout_seconds=3.0)
+    def _stop_timed_out_process(self, run: CodexRun) -> bool:
+        return self.stop(run, timeout_seconds=3.0)
 
     def _drain_remaining_output(self, run: CodexRun) -> None:
         stdout = run.process.stdout
@@ -242,6 +240,12 @@ class CodexRunner:
             process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             return False
+        return True
+
+    def _drain_if_exited(self, run: CodexRun) -> bool:
+        if run.process.poll() is None:
+            return False
+        self._drain_remaining_output(run)
         return True
 
     def _remaining_timeout(self, deadline: float) -> float:
