@@ -49,16 +49,16 @@ class SlackRouter:
         message_ts = str(event["ts"])
         thread_ts = str(event.get("thread_ts") or message_ts)
         if prompt == "status":
-            reply(self._commands.status(thread_ts))
+            self._reply_command_result(reply, lambda: self._commands.status(thread_ts))
             return
         if prompt == "cancel":
-            reply(self._commands.cancel(thread_ts))
+            self._reply_command_result(reply, lambda: self._commands.cancel(thread_ts))
             return
         if prompt == "what changed":
-            reply(self._commands.what_changed(thread_ts))
+            self._reply_command_result(reply, lambda: self._commands.what_changed(thread_ts))
             return
         if prompt == "show diff":
-            reply(self._commands.show_diff(project.path))
+            self._reply_command_result(reply, lambda: self._commands.show_diff(project.path))
             return
 
         if event.get("thread_ts"):
@@ -67,13 +67,17 @@ class SlackRouter:
                 reply("This thread has no stored Codex session yet.")
                 return
 
-            self._manager.handle_follow_up(
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                user_message_ts=message_ts,
-                prompt=prompt,
-                project=project,
-            )
+            try:
+                self._manager.handle_follow_up(
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    user_message_ts=message_ts,
+                    prompt=prompt,
+                    project=project,
+                )
+            except Exception as exc:
+                reply(f"Could not continue Codex session: {exc}")
+                return
             self.start_completion_watch(
                 channel_id=channel_id,
                 thread_ts=thread_ts,
@@ -83,13 +87,17 @@ class SlackRouter:
             reply("Interrupted prior run and resumed the Codex session with the latest message.")
             return
 
-        self._manager.start_new_thread(
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            user_message_ts=message_ts,
-            prompt=prompt,
-            project=project,
-        )
+        try:
+            self._manager.start_new_thread(
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                user_message_ts=message_ts,
+                prompt=prompt,
+                project=project,
+            )
+        except Exception as exc:
+            reply(f"Could not start Codex task: {exc}")
+            return
         self.start_completion_watch(
             channel_id=channel_id,
             thread_ts=thread_ts,
@@ -97,6 +105,12 @@ class SlackRouter:
             reply=reply,
         )
         reply(f"Started Codex task for project `{project.name}`.")
+
+    def _reply_command_result(self, reply: ReplyFn, command: Callable[[], str]) -> None:
+        try:
+            reply(command())
+        except Exception as exc:
+            reply(f"Could not run router command: {exc}")
 
     def _watch_completion(
         self,
