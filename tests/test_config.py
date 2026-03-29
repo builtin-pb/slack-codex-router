@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from slack_codex_router.config import AppConfig, load_config
 from slack_codex_router.registry import ProjectRegistry
 
@@ -57,3 +59,42 @@ def test_project_registry_returns_project_by_channel(tmp_path: Path) -> None:
     assert project.name == "demo"
     assert project.path == project_path
     assert project.max_concurrent_jobs == 2
+
+
+def test_project_registry_rejects_duplicate_channel_ids(tmp_path: Path) -> None:
+    projects_file = tmp_path / "projects.yaml"
+    project_one = tmp_path / "project_one"
+    project_two = tmp_path / "project_two"
+    project_one.mkdir()
+    project_two.mkdir()
+    projects_file.write_text(
+        "projects:\n"
+        "  - channel_id: C123\n"
+        "    name: first\n"
+        f"    path: {project_one}\n"
+        "    max_concurrent_jobs: 2\n"
+        "  - channel_id: C123\n"
+        "    name: second\n"
+        f"    path: {project_two}\n"
+        "    max_concurrent_jobs: 2\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Duplicate channel_id 'C123'"):
+        ProjectRegistry.from_yaml(projects_file)
+
+
+def test_project_registry_rejects_missing_project_path(tmp_path: Path) -> None:
+    projects_file = tmp_path / "projects.yaml"
+    project_path = tmp_path / "missing"
+    projects_file.write_text(
+        "projects:\n"
+        "  - channel_id: C404\n"
+        "    name: missing\n"
+        f"    path: {project_path}\n"
+        "    max_concurrent_jobs: 2\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        ProjectRegistry.from_yaml(projects_file)
