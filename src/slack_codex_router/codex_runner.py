@@ -91,11 +91,8 @@ class CodexRunner:
                     self._append_log_lines(run.log_path, ready_lines)
 
             if time.monotonic() >= deadline:
-                self.interrupt(run)
-                try:
-                    run.process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    pass
+                self._stop_timed_out_process(run)
+                self._drain_remaining_output(run)
                 return (124, "Codex run timed out before completion.")
 
         self._drain_remaining_output(run)
@@ -186,6 +183,21 @@ class CodexRunner:
         with log_path.open("a", encoding="utf-8") as handle:
             handle.writelines(lines)
 
+    def _stop_timed_out_process(self, run: CodexRun) -> None:
+        self.interrupt(run)
+        if self._wait_for_exit(run.process, timeout_seconds=1):
+            return
+
+        run.process.terminate()
+        if self._wait_for_exit(run.process, timeout_seconds=1):
+            return
+
+        run.process.kill()
+        try:
+            run.process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            run.process.wait()
+
     def _drain_remaining_output(self, run: CodexRun) -> None:
         stdout = run.process.stdout
         if stdout is None:
@@ -199,6 +211,13 @@ class CodexRunner:
         if tail and not tail.endswith("\n"):
             lines = tail.splitlines(keepends=True)
         self._append_log_lines(run.log_path, lines)
+
+    def _wait_for_exit(self, process: subprocess.Popen[str], *, timeout_seconds: float) -> bool:
+        try:
+            process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            return False
+        return True
 
     def _read_ready_lines(self, stream: TextIOBase, *, timeout_seconds: float) -> list[str]:
         lines: list[str] = []
