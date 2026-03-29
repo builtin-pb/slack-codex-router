@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from slack_codex_router.job_manager import JobManager
 from slack_codex_router.registry import ProjectConfig, ProjectRegistry
 from slack_codex_router.slack_app import SlackRouter
@@ -44,7 +46,7 @@ class FakeRunner:
         return (0, run.output_file.read_text(encoding="utf-8"))
 
 
-def test_publish_completion_posts_summary_back_into_thread(tmp_path: Path) -> None:
+def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     registry = ProjectRegistry(
         {
@@ -59,6 +61,11 @@ def test_publish_completion_posts_summary_back_into_thread(tmp_path: Path) -> No
     manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
     router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
     replies: list[str] = []
+    watch_calls: list[tuple[str, str]] = []
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts)
+    )
 
     router.handle_message(
         {
@@ -69,24 +76,27 @@ def test_publish_completion_posts_summary_back_into_thread(tmp_path: Path) -> No
         },
         replies.append,
     )
-    manager.complete_thread(
-        "1710000000.100000",
-        exit_code=0,
-        summary="Final summary from Codex",
-        interrupted=False,
-    )
-    router.publish_completion(
-        channel_id="C123",
-        thread_ts="1710000000.100000",
-        summary="Final summary from Codex",
-        interrupted=False,
-        reply=replies.append,
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "thread_ts": "1710000000.100000",
+            "ts": "1710000001.100000",
+            "text": "only touch docs",
+        },
+        replies.append,
     )
 
-    assert replies[-1] == "Finished Codex run.\n\nFinal summary from Codex"
+    session = store.get_thread_session("1710000000.100000")
+    assert session["codex_thread_id"] == "session-1"
+    assert watch_calls == [("C123", "1710000000.100000"), ("C123", "1710000000.100000")]
+    assert replies == [
+        "Started Codex task for project `demo`.",
+        "Interrupted prior run and resumed the Codex session with the latest message.",
+    ]
 
 
-def test_wait_for_thread_finalizes_latest_job_and_thread_status(tmp_path: Path) -> None:
+def test_handle_message_rejects_invalid_requests_and_surfaces_limit_errors(tmp_path: Path) -> None:
     store = RouterStore(tmp_path / "router.sqlite3")
     registry = ProjectRegistry(
         {
@@ -100,30 +110,64 @@ def test_wait_for_thread_finalizes_latest_job_and_thread_status(tmp_path: Path) 
     )
     manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
     router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    invalid_replies: list[str] = []
+    limit_replies: list[str] = []
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, reply: None  # type: ignore[method-assign]
+
+    router.handle_message(
+        {
+            "user": "U999",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        invalid_replies.append,
+    )
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C999",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        invalid_replies.append,
+    )
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "   ",
+        },
+        invalid_replies.append,
+    )
+
+    assert invalid_replies == [
+        "User is not allowed to control this router.",
+        "This channel is not registered to a project.",
+        "Send a non-empty message to start or continue a task.",
+    ]
 
     router.handle_message(
         {
             "user": "U123",
             "channel": "C123",
             "ts": "1710000000.100000",
-            "text": "inspect this repo",
+            "text": "first task",
         },
-        lambda _: None,
+        limit_replies.append,
     )
 
-    result = manager.wait_for_thread("1710000000.100000")
-    latest_job = store.get_latest_job("1710000000.100000")
-    session = store.get_thread_session("1710000000.100000")
+    with pytest.raises(RuntimeError, match="Project concurrency limit reached"):
+        router.handle_message(
+            {
+                "user": "U123",
+                "channel": "C123",
+                "ts": "1710000001.100000",
+                "text": "second task",
+            },
+            limit_replies.append,
+        )
 
-    assert result == (0, "Final summary from Codex", False)
-    assert latest_job["state"] == "finished"
-    assert latest_job["last_result_summary"] == "Final summary from Codex"
-    assert session["status"] == "finished"
-
-    manager.start_new_thread(
-        channel_id="C123",
-        thread_ts="1710000002.100000",
-        user_message_ts="1710000002.100000",
-        prompt="next task",
-        project=registry.by_channel("C123"),
-    )
+    assert limit_replies == ["Started Codex task for project `demo`."]
