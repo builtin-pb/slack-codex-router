@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,21 @@ class FakeRunner:
         return (0, run.output_file.read_text(encoding="utf-8"))
 
 
+class BlockingResumeRunner(FakeRunner):
+    def __init__(self) -> None:
+        self.resume_started = threading.Event()
+        self.release_resume = threading.Event()
+
+    def stop(self, run, timeout_seconds: float) -> bool:
+        del run, timeout_seconds
+        return True
+
+    def resume(self, project_path: Path, session_id: str, prompt: str):
+        self.resume_started.set()
+        self.release_resume.wait(timeout=1)
+        return super().resume(project_path, session_id, prompt)
+
+
 class FailingManager:
     def __init__(self, *, start_error: str | None = None, follow_up_error: str | None = None) -> None:
         self.start_error = start_error
@@ -65,11 +81,15 @@ class FailingManager:
             raise RuntimeError(self.start_error)
         raise AssertionError("expected start_new_thread to fail in this test")
 
-    def handle_follow_up(self, **kwargs):
-        self.follow_up_calls.append(dict(kwargs))
+    def prepare_follow_up(self, **kwargs):
+        self.follow_up_calls.append({"phase": "prepare", **dict(kwargs)})
+        return type("PreparedFollowUp", (), {"session_id": "session-1", "interrupted_prior_run": False})()
+
+    def resume_follow_up(self, **kwargs):
+        self.follow_up_calls.append({"phase": "resume", **dict(kwargs)})
         if self.follow_up_error is not None:
             raise RuntimeError(self.follow_up_error)
-        raise AssertionError("expected handle_follow_up to fail in this test")
+        raise AssertionError("expected resume_follow_up to fail in this test")
 
 
 class CompletionFailureManager:
@@ -156,6 +176,123 @@ def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Pat
     assert replies == [
         "Started Codex task for project `demo`.",
         "Interrupted prior run and resumed the Codex session with the latest message.",
+    ]
+
+
+def test_follow_up_after_finished_run_resumes_silently(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    manager = JobManager(store=store, runner=FakeRunner(), global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+    watch_calls: list[tuple[str, str, str]] = []
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
+    )
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        replies.append,
+    )
+    assert manager.wait_for_thread(
+        "1710000000.100000",
+        expected_message_ts="1710000000.100000",
+    ) == (0, "Final summary from Codex", False)
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "thread_ts": "1710000000.100000",
+            "ts": "1710000001.100000",
+            "text": "only touch docs",
+        },
+        replies.append,
+    )
+
+    assert watch_calls == [
+        ("C123", "1710000000.100000", "1710000000.100000"),
+        ("C123", "1710000000.100000", "1710000001.100000"),
+    ]
+    assert replies == ["Started Codex task for project `demo`."]
+
+
+def test_follow_up_reports_interruption_before_resume_finishes(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    runner = BlockingResumeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(allowed_user_id="U123", registry=registry, manager=manager, store=store)
+    replies: list[str] = []
+    watch_calls: list[tuple[str, str, str]] = []
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
+    )
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        replies.append,
+    )
+
+    follow_up_thread = threading.Thread(
+        target=router.handle_message,
+        args=(
+            {
+                "user": "U123",
+                "channel": "C123",
+                "thread_ts": "1710000000.100000",
+                "ts": "1710000001.100000",
+                "text": "only touch docs",
+            },
+            replies.append,
+        ),
+    )
+    follow_up_thread.start()
+
+    assert runner.resume_started.wait(timeout=1)
+    assert replies == [
+        "Started Codex task for project `demo`.",
+        "Interrupted prior run and resumed the Codex session with the latest message.",
+    ]
+    assert watch_calls == [("C123", "1710000000.100000", "1710000000.100000")]
+
+    runner.release_resume.set()
+    follow_up_thread.join(timeout=1)
+
+    assert not follow_up_thread.is_alive()
+    assert watch_calls == [
+        ("C123", "1710000000.100000", "1710000000.100000"),
+        ("C123", "1710000000.100000", "1710000001.100000"),
     ]
 
 
@@ -314,7 +451,7 @@ def test_follow_up_manager_failure_replies_instead_of_raising(tmp_path: Path) ->
     )
 
     assert replies == ["Could not continue Codex session: resume failed"]
-    assert len(manager.follow_up_calls) == 1
+    assert [call["phase"] for call in manager.follow_up_calls] == ["prepare", "resume"]
     assert watch_calls == []
 
 

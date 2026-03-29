@@ -68,12 +68,23 @@ class SlackRouter:
                 return
 
             try:
-                self._manager.handle_follow_up(
+                prepared = self._manager.prepare_follow_up(
+                    thread_ts=thread_ts,
+                    user_message_ts=message_ts,
+                )
+            except Exception as exc:
+                reply(f"Could not continue Codex session: {exc}")
+                return
+            if prepared.interrupted_prior_run:
+                reply("Interrupted prior run and resumed the Codex session with the latest message.")
+            try:
+                self._manager.resume_follow_up(
                     channel_id=channel_id,
                     thread_ts=thread_ts,
                     user_message_ts=message_ts,
                     prompt=prompt,
                     project=project,
+                    session_id=prepared.session_id,
                 )
             except Exception as exc:
                 reply(f"Could not continue Codex session: {exc}")
@@ -84,7 +95,6 @@ class SlackRouter:
                 expected_message_ts=message_ts,
                 reply=reply,
             )
-            reply("Interrupted prior run and resumed the Codex session with the latest message.")
             return
 
         try:

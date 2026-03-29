@@ -22,6 +22,12 @@ class ActiveRun:
     run: object
 
 
+@dataclass
+class PreparedFollowUp:
+    session_id: str
+    interrupted_prior_run: bool
+
+
 class JobManager:
     def __init__(
         self,
@@ -139,13 +145,34 @@ class JobManager:
         user_message_ts: str,
         prompt: str,
         project: ProjectConfig,
-    ) -> ActiveRun:
+    ) -> bool:
+        prepared = self.prepare_follow_up(
+            thread_ts=thread_ts,
+            user_message_ts=user_message_ts,
+        )
+        self.resume_follow_up(
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            user_message_ts=user_message_ts,
+            prompt=prompt,
+            project=project,
+            session_id=prepared.session_id,
+        )
+        return prepared.interrupted_prior_run
+
+    def prepare_follow_up(
+        self,
+        *,
+        thread_ts: str,
+        user_message_ts: str,
+    ) -> PreparedFollowUp:
         session = self._store.get_thread_session(thread_ts)
         if session is None:
             raise RuntimeError(f"No thread session found for thread {thread_ts}")
 
         session_id = str(session["codex_thread_id"])
         current = self._active_by_thread.get(thread_ts)
+        interrupted_prior_run = False
         if current is not None:
             if not isinstance(current, ActiveRun):
                 raise RuntimeError(f"Thread {thread_ts} is transitioning between Codex runs")
@@ -170,13 +197,28 @@ class JobManager:
                     interrupted=True,
                     summary="",
                 )
+            interrupted_prior_run = True
 
         self._store.mark_thread_status(
             thread_ts,
             str(session["status"]),
             last_user_message_ts=user_message_ts,
         )
+        return PreparedFollowUp(
+            session_id=session_id,
+            interrupted_prior_run=interrupted_prior_run,
+        )
 
+    def resume_follow_up(
+        self,
+        *,
+        channel_id: str,
+        thread_ts: str,
+        user_message_ts: str,
+        prompt: str,
+        project: ProjectConfig,
+        session_id: str,
+    ) -> None:
         run = None
         try:
             run = self._runner.resume(project.path, session_id, prompt)
@@ -198,7 +240,6 @@ class JobManager:
         active = ActiveRun(thread_ts=thread_ts, session_id=session_id, pid=run.pid, run=run)
         self._active_by_thread[thread_ts] = active
         self._active_by_project.setdefault(project.channel_id, set()).add(thread_ts)
-        return active
 
     def cancel_thread(self, thread_ts: str) -> bool:
         try:
