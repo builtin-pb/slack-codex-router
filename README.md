@@ -31,19 +31,25 @@ uv run python -m slack_codex_router.main run
 
 ## launchd
 
-1. Make the wrapper executable:
+1. Create the log directory launchd writes into:
+
+```bash
+mkdir -p logs
+```
+
+2. Make the wrapper executable:
 
 ```bash
 chmod +x scripts/run-router.sh
 ```
 
-2. Load the service into your user launchd session:
+3. Load the service into your user launchd session:
 
 ```bash
 launchctl bootstrap gui/$(id -u) ops/com.builtin.pb.slack-codex-router.plist
 ```
 
-3. Start or restart it immediately:
+4. Start or restart it immediately:
 
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.builtin.pb.slack-codex-router
