@@ -22,12 +22,15 @@ class ProjectRegistry:
     def from_yaml(cls, path: Path) -> "ProjectRegistry":
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         projects = {}
+        registry_dir = path.parent
         for item in raw.get("projects", []):
             channel_id = item["channel_id"]
             if channel_id in projects:
                 raise ValueError(f"Duplicate channel_id '{channel_id}' in project registry")
 
-            project_path = Path(item["path"])
+            project_path = Path(item["path"]).expanduser()
+            if not project_path.is_absolute():
+                project_path = (registry_dir / project_path).resolve()
             if not project_path.exists():
                 raise ValueError(
                     f"Project path for channel '{channel_id}' does not exist: {project_path}"

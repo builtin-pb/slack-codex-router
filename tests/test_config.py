@@ -40,6 +40,39 @@ def test_load_config_reads_required_environment(tmp_path: Path, monkeypatch) -> 
     )
 
 
+def test_load_config_resolves_relative_paths_from_root_dir(tmp_path: Path, monkeypatch) -> None:
+    root_dir = tmp_path / "repo"
+    config_dir = root_dir / "config"
+    state_dir = root_dir / "state"
+    log_dir = root_dir / "logs"
+    config_dir.mkdir(parents=True)
+    state_dir.mkdir()
+    log_dir.mkdir()
+    projects_file = config_dir / "projects.yaml"
+    state_db = state_dir / "router.sqlite3"
+    projects_file.write_text(
+        "projects:\n"
+        "  - channel_id: C123\n"
+        "    name: demo\n"
+        "    path: /tmp/demo\n"
+        "    max_concurrent_jobs: 2\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+    monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+    monkeypatch.setenv("SLACK_ALLOWED_USER_ID", "U123")
+    monkeypatch.setenv("SCR_ROOT_DIR", str(root_dir))
+    monkeypatch.setenv("SCR_PROJECTS_FILE", "config/projects.yaml")
+    monkeypatch.setenv("SCR_STATE_DB", "state/router.sqlite3")
+    monkeypatch.setenv("SCR_LOG_DIR", "logs")
+
+    config = load_config()
+
+    assert config.projects_file == projects_file
+    assert config.state_db == state_db
+    assert config.log_dir == log_dir
+
+
 def test_project_registry_returns_project_by_channel(tmp_path: Path) -> None:
     projects_file = tmp_path / "projects.yaml"
     project_path = tmp_path / "demo"
@@ -60,6 +93,27 @@ def test_project_registry_returns_project_by_channel(tmp_path: Path) -> None:
     assert project.name == "demo"
     assert project.path == project_path
     assert project.max_concurrent_jobs == 2
+
+
+def test_project_registry_resolves_relative_paths_from_registry_file(tmp_path: Path) -> None:
+    projects_file = tmp_path / "config" / "projects.yaml"
+    project_path = tmp_path / "demo"
+    project_path.mkdir()
+    projects_file.parent.mkdir()
+    projects_file.write_text(
+        "projects:\n"
+        "  - channel_id: C123\n"
+        "    name: demo\n"
+        "    path: ../demo\n"
+        "    max_concurrent_jobs: 2\n",
+        encoding="utf-8",
+    )
+
+    registry = ProjectRegistry.from_yaml(projects_file)
+    project = registry.by_channel("C123")
+
+    assert project is not None
+    assert project.path == project_path
 
 
 def test_project_registry_rejects_duplicate_channel_ids(tmp_path: Path) -> None:

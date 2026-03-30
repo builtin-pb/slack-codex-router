@@ -1,6 +1,6 @@
 # Slack Codex Router
 
-Slack Codex Router is a local control-plane service that maps private Slack channels to local project directories and routes Slack threads into Codex sessions on this Mac.
+Slack Codex Router is a local control-plane service that maps private Slack channels to local project directories and routes Slack threads into Codex sessions on the local machine.
 
 ## Setup
 
@@ -21,15 +21,35 @@ The first copy command gives you a complete environment template to fill in loca
 
 3. Edit `.env` and `config/projects.yaml` with real values before starting the service.
 
+Relative paths are supported:
+
+- `SCR_PROJECTS_FILE`, `SCR_STATE_DB`, and `SCR_LOG_DIR` resolve relative to the repo root when started by the wrapper.
+- Project `path` entries in `config/projects.yaml` resolve relative to that YAML file.
+
+Slack app requirements:
+
+- Enable Socket Mode and create an app-level token with `connections:write`.
+- Add bot token scopes `chat:write`, `groups:history`, and `files:read`.
+- Subscribe to the bot event `message.groups`.
+- Reinstall the app after changing scopes.
+
+If attached images download as HTML instead of image bytes, the app is usually missing `files:read` or has not been reinstalled after that scope was added.
+
 ## Run
 
-Start or restart the background service in one command:
+Start or restart the service in one command:
 
 ```bash
 scripts/start-router.sh
 ```
 
-## launchd
+The wrapper auto-detects the host environment:
+
+- macOS: installs or refreshes a user `launchd` agent.
+- Linux with `systemd --user`: installs or refreshes a user service.
+- Linux without `systemd`: runs the router in the foreground.
+
+## Service Wrapper
 
 1. Make the startup wrapper executable:
 
@@ -42,5 +62,3 @@ chmod +x scripts/start-router.sh
 ```bash
 scripts/start-router.sh
 ```
-
-The wrapper installs or refreshes the LaunchAgent in `~/Library/LaunchAgents`, loads the required environment variables from `.env`, and starts the router under `launchd`.
