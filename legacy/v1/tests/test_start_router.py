@@ -13,18 +13,18 @@ def _write_executable(path: Path, content: str) -> None:
 
 def test_start_router_installs_systemd_user_unit_from_repo_relative_paths(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
-    scripts_dir = repo_root / "scripts"
+    legacy_scripts_dir = repo_root / "legacy" / "v1" / "scripts"
     config_dir = repo_root / "config"
     fake_bin = tmp_path / "fake-bin"
     home_dir = tmp_path / "home"
     systemctl_log = tmp_path / "systemctl.log"
-    scripts_dir.mkdir(parents=True)
+    legacy_scripts_dir.mkdir(parents=True)
     config_dir.mkdir()
     fake_bin.mkdir()
     home_dir.mkdir()
 
-    source_script = Path(__file__).resolve().parents[1] / "scripts" / "start-router.sh"
-    script_path = scripts_dir / "start-router.sh"
+    source_script = Path(__file__).resolve().parents[1] / "scripts" / "start-router-v1.sh"
+    script_path = legacy_scripts_dir / "start-router-v1.sh"
     script_path.write_text(source_script.read_text(encoding="utf-8"), encoding="utf-8")
     script_path.chmod(source_script.stat().st_mode | stat.S_IXUSR)
 
@@ -69,7 +69,10 @@ def test_start_router_installs_systemd_user_unit_from_repo_relative_paths(tmp_pa
     assert f"WorkingDirectory={repo_root}" in unit_text
     assert f"Environment=SCR_ROOT_DIR={repo_root}" in unit_text
     assert f"EnvironmentFile={repo_root / '.env'}" in unit_text
-    assert f"ExecStart={fake_bin / 'uv'} run slack-codex-router run" in unit_text
+    assert "ExecStart=/bin/sh -lc" in unit_text
+    assert str(repo_root / "legacy" / "v1" / "src") in unit_text
+    assert str(fake_bin / "uv") in unit_text
+    assert "run python -m slack_codex_router.main run" in unit_text
 
     systemctl_lines = systemctl_log.read_text(encoding="utf-8").splitlines()
     assert systemctl_lines == [

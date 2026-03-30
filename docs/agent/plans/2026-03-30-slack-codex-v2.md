@@ -46,6 +46,95 @@
 
 Keep the legacy Python code under `src/slack_codex_router/` unchanged until the final cutover task.
 
+### Task 0: Archive the current Python router as `legacy/v1`
+
+**Files:**
+- Create: `legacy/v1/README.md`
+- Move: `src/slack_codex_router` -> `legacy/v1/src/slack_codex_router`
+- Move: `tests/test_*.py` -> `legacy/v1/tests/`
+- Move: `tests/fixtures/codex_exec_sample.jsonl` -> `legacy/v1/tests/fixtures/codex_exec_sample.jsonl`
+- Move: `docs/superpowers/specs/2026-03-29-slack-codex-project-router-design.md` -> `legacy/v1/docs/specs/2026-03-29-slack-codex-project-router-design.md`
+- Move: `docs/superpowers/plans/2026-03-29-slack-codex-project-router.md` -> `legacy/v1/docs/plans/2026-03-29-slack-codex-project-router.md`
+- Move: `scripts/start-router.sh` -> `legacy/v1/scripts/start-router-v1.sh`
+- Move: `config/projects.example.yaml` -> `legacy/v1/config/projects.example.yaml`
+- Modify: `README.md`
+- Create: `scripts/start-router.sh`
+
+- [x] **Step 1: Write the failing archive test**
+Observed: Added `tests/test_archive_layout.py` with the Task 0 archive assertions before moving the Python test suite into `legacy/v1/tests`.
+
+```python
+from pathlib import Path
+
+
+def test_v1_router_is_archived_under_legacy_v1() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    assert (repo_root / "legacy" / "v1" / "src" / "slack_codex_router").is_dir()
+    assert (repo_root / "legacy" / "v1" / "scripts" / "start-router-v1.sh").is_file()
+    assert (repo_root / "scripts" / "start-router.sh").is_file()
+```
+
+- [x] **Step 2: Run the archive check to verify it fails**
+Observed: `python` was not available on PATH, so I ran the same assertion with `python3`; it failed with `AssertionError` as expected because `legacy/v1/src/slack_codex_router` did not exist yet.
+
+Run: `python - <<'PY'\nfrom pathlib import Path\nrepo = Path.cwd()\nassert (repo / 'legacy' / 'v1' / 'src' / 'slack_codex_router').exists()\nPY`  
+Expected: fail because `legacy/v1/src/slack_codex_router` does not exist yet.
+
+- [x] **Step 3: Move the Python router, tests, and v1 docs into `legacy/v1`**
+Observed: Moved `src/slack_codex_router`, the Python `tests/test_*.py` files plus fixture, the March 29 v1 spec/plan docs, `config/projects.example.yaml`, and the original wrapper into `legacy/v1`; added `legacy/v1/README.md`, a `legacy/v1/tests/conftest.py` path shim, and updated `legacy/v1/scripts/start-router-v1.sh` so it still launches the archived router from `legacy/v1/src` while reading the repo-root `.env`.
+
+```bash
+mkdir -p legacy/v1/src legacy/v1/tests/fixtures legacy/v1/docs/specs legacy/v1/docs/plans legacy/v1/scripts legacy/v1/config
+mv src/slack_codex_router legacy/v1/src/
+mv tests/test_*.py legacy/v1/tests/
+mv tests/fixtures/codex_exec_sample.jsonl legacy/v1/tests/fixtures/
+mv docs/superpowers/specs/2026-03-29-slack-codex-project-router-design.md legacy/v1/docs/specs/
+mv docs/superpowers/plans/2026-03-29-slack-codex-project-router.md legacy/v1/docs/plans/
+mv scripts/start-router.sh legacy/v1/scripts/start-router-v1.sh
+mv config/projects.example.yaml legacy/v1/config/
+```
+
+Create `legacy/v1/README.md` describing:
+- this is the archived Python `v1` router
+- the repo root is being repurposed for `v2`
+- `legacy/v1/scripts/start-router-v1.sh` is the historical wrapper
+
+Create a new root `scripts/start-router.sh` that only delegates:
+
+```bash
+#!/bin/sh
+set -eu
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+if [ -x "$ROOT_DIR/v2/dist/bin/launcher.js" ] || [ -f "$ROOT_DIR/v2/package.json" ]; then
+  echo "v2 startup is not implemented yet in this task."
+  exit 1
+fi
+
+echo "v2 is not ready yet; delegating to archived legacy/v1 router." >&2
+exec "$ROOT_DIR/legacy/v1/scripts/start-router-v1.sh" "$@"
+```
+
+Update root `README.md` so the first screen says:
+- `v1` is archived under `legacy/v1`
+- `v2` is the active rewrite target
+- current root wrapper temporarily delegates to the archived `v1` script until `v2` lands
+
+- [x] **Step 4: Run the archive checks**
+Observed: The layout assertion passed via `python3`, printing `archive layout ok`; `uv run pytest legacy/v1/tests/test_archive_layout.py legacy/v1/tests/test_start_router.py` also passed (`2 passed in 0.47s`) after updating the archived wrapper test for the new shell-quoted `systemd` command.
+
+Run: `python - <<'PY'\nfrom pathlib import Path\nrepo = Path.cwd()\nassert (repo / 'legacy' / 'v1' / 'src' / 'slack_codex_router').is_dir()\nassert (repo / 'legacy' / 'v1' / 'scripts' / 'start-router-v1.sh').is_file()\nassert (repo / 'scripts' / 'start-router.sh').is_file()\nprint('archive layout ok')\nPY`  
+Expected: prints `archive layout ok`
+
+- [x] **Step 5: Commit**
+Observed: Created the requested commit with message `refactor: archive python router as legacy v1`.
+
+```bash
+git add legacy/v1 README.md scripts/start-router.sh src tests docs/superpowers config
+git commit -m "refactor: archive python router as legacy v1"
+```
+
 ### Task 1: Bootstrap the `v2` TypeScript workspace
 
 **Files:**
@@ -744,6 +833,7 @@ git commit -m "feat: complete v2 restart recovery and cutover docs"
 ## Self-Review
 
 - Spec coverage:
+  - archive current Python router before `v2` execution begins: Task 0
   - App Server authority: Tasks 4-5
   - Slack-native controls and user input: Tasks 5-6
   - worktree-per-thread isolation and merge flow: Task 7

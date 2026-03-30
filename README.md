@@ -1,8 +1,12 @@
 # Slack Codex Router
 
-Slack Codex Router is a local control-plane service that maps private Slack channels to local project directories and routes Slack threads into Codex sessions on the local machine.
+This repository is in a cutover state:
 
-## Setup
+- `legacy/v1` contains the archived Python router.
+- `v2` is the active rewrite target.
+- `scripts/start-router.sh` currently delegates to `legacy/v1/scripts/start-router-v1.sh` because `v2` is not ready yet.
+
+## Current v1 Setup
 
 1. Install dependencies:
 
@@ -14,42 +18,22 @@ uv sync --dev
 
 ```bash
 cp .env.example .env
-cp config/projects.example.yaml config/projects.yaml
+cp legacy/v1/config/projects.example.yaml config/projects.yaml
 ```
-
-The first copy command gives you a complete environment template to fill in locally. The second copy command gives you a complete channel/project registry template to edit for your Slack channels and project paths.
 
 3. Edit `.env` and `config/projects.yaml` with real values before starting the service.
 
-Relative paths are supported:
+Relative paths are still supported:
 
 - `SCR_PROJECTS_FILE`, `SCR_STATE_DB`, and `SCR_LOG_DIR` resolve relative to the repo root when started by the wrapper.
 - Project `path` entries in `config/projects.yaml` resolve relative to that YAML file.
 
 ## Run
 
-Start or restart the service in one command:
+Start or restart the current archived `v1` router through the temporary root wrapper:
 
 ```bash
 scripts/start-router.sh
 ```
 
-The wrapper auto-detects the host environment:
-
-- macOS: installs or refreshes a user `launchd` agent.
-- Linux with `systemd --user`: installs or refreshes a user service.
-- Linux without `systemd`: runs the router in the foreground.
-
-## Service Wrapper
-
-1. Make the startup wrapper executable:
-
-```bash
-chmod +x scripts/start-router.sh
-```
-
-2. Start or restart it:
-
-```bash
-scripts/start-router.sh
-```
+The root wrapper prints that `v2` is not ready yet, then delegates to the archived `v1` wrapper.
