@@ -9,18 +9,18 @@ export type LauncherDeps = {
 };
 
 export type Launcher = {
-  runOnce(): Promise<void>;
+  runOnce(): Promise<number>;
 };
 
 export function buildLauncher(deps: LauncherDeps): Launcher {
   return {
-    async runOnce(): Promise<void> {
+    async runOnce(): Promise<number> {
       while (true) {
         const worker = await deps.spawnWorker();
         const exitCode = await worker.wait();
 
         if (!isRestartExitCode(exitCode)) {
-          return;
+          return exitCode;
         }
       }
     },

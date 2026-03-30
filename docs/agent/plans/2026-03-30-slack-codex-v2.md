@@ -550,7 +550,7 @@ describe("buildLauncher", () => {
 - [x] **Step 2: Run the launcher test**
 Observed: The literal plan command `npm --prefix v2 test -- v2/test/launcher.test.ts` did not match Vitest's path resolution under `--prefix v2` and returned `No test files found`; rerunning as `npm --prefix v2 test -- test/launcher.test.ts` produced the intended red state with `Cannot find module '../src/runtime/launcher.js'`.
 
-Run: `npm --prefix v2 test -- v2/test/launcher.test.ts`  
+Run: `npm --prefix v2 test -- test/launcher.test.ts`  
 Expected: fail because no launcher exists.
 
 - [x] **Step 3: Implement a function-agnostic launcher**
@@ -588,7 +588,7 @@ export function buildLauncher(deps: {
 - [x] **Step 4: Run the launcher test**
 Observed: `npm --prefix v2 test -- test/launcher.test.ts` passed with `1 passed`; additional required verification also succeeded with `npm --prefix v2 run build` after correcting the invalid bare `npm --prefix v2 build` invocation.
 
-Run: `npm --prefix v2 test -- v2/test/launcher.test.ts`  
+Run: `npm --prefix v2 test -- test/launcher.test.ts`  
 Expected: `1 passed`
 
 - [x] **Step 5: Commit**
