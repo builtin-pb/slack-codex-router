@@ -612,22 +612,25 @@ Observed: Added `v2/test/app_server_client.test.ts` first, covering the narrow c
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { AppServerClient } from "../src/app_server/client";
+import { AppServerClient } from "../src/app_server/client.js";
 
 describe("AppServerClient", () => {
-  it("sends requests and emits parsed notifications", async () => {
+  it("matches out-of-order responses to the original request ids", async () => {
     const sent: string[] = [];
+    let nextId = 1;
     const client = new AppServerClient({
       writeLine: (line) => sent.push(line),
+      createRequestId: () => String(nextId++),
     });
 
-    const response = client.expectResponse("1");
-    client.handleLine('{"id":"1","result":{"threadId":"thread_123"}}');
+    const first = client.threadStart({ prompt: "first" });
+    const second = client.turnSteer({ turnId: "turn_123", prompt: "second" });
 
-    expect(await response).toEqual({ threadId: "thread_123" });
+    client.handleLine('{"id":"2","error":{"code":409,"message":"second request failed"}}');
+    client.handleLine('{"id":"1","result":{"threadId":"thread_first"}}');
 
-    client.handleLine('{"method":"thread/status/changed","params":{"threadId":"thread_123"}}');
-    expect(sent[0]).toContain('"method":"initialize"');
+    await expect(second).rejects.toThrow("second request failed");
+    await expect(first).resolves.toEqual({ threadId: "thread_first" });
   });
 });
 ```
@@ -639,7 +642,7 @@ Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`
 Expected: fail because the client and event parser do not exist.
 
 - [x] **Step 3: Implement the stdio client**
-Observed: Added `v2/src/app_server/events.ts`, `v2/src/app_server/client.ts`, and `v2/src/app_server/process.ts`. The implementation stays narrow: a typed notification parser and subscription stream, JSON line request/response correlation with minimal App Server methods, and a thin stdio spawn wrapper for later tasks to attach to.
+Observed: Added `v2/src/app_server/events.ts`, `v2/src/app_server/client.ts`, and `v2/src/app_server/process.ts`. The implementation stays narrow: a typed notification parser and subscription stream, JSON line request/response correlation with minimal App Server methods, pending-request teardown on transport failure, and a thin stdio spawn wrapper that now preserves fast-exit terminal state for later callers.
 
 ```ts
 export type AppServerNotification =
@@ -658,7 +661,7 @@ export class AppServerClient {
 ```
 
 - [x] **Step 4: Run the App Server client test**
-Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id (`1 passed`, `3 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` then succeeded after tightening the `events.ts` type guards for strict TypeScript compilation.
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id and to cover synchronous write failures plus transport teardown (`1 passed`, `7 passed` tests). Follow-up transport verification also added `v2/test/app_server_process.test.ts` for fast-exit `waitForExit()` behavior (`1 passed`, `2 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` succeeded.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
 Expected: `1 passed`

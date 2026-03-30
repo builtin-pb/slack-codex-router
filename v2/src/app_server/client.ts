@@ -41,6 +41,15 @@ export class AppServerClient {
     await this.sendRequest("turn/interrupt", input);
   }
 
+  failPendingRequests(error: Error): void {
+    const pendingRequests = [...this.pendingRequests.values()];
+    this.pendingRequests.clear();
+
+    for (const pendingRequest of pendingRequests) {
+      pendingRequest.reject(error);
+    }
+  }
+
   handleLine(line: string): void {
     const message = parseAppServerLine(line);
 
@@ -74,15 +83,22 @@ export class AppServerClient {
   ): Promise<T> {
     const id = this.createRequestId();
     const payload = JSON.stringify({ id, method, params });
+    let pendingRequest: PendingRequest | undefined;
 
     const promise = new Promise<unknown>((resolve, reject) => {
-      this.pendingRequests.set(id, {
+      pendingRequest = {
         resolve,
         reject,
-      });
+      };
+      this.pendingRequests.set(id, pendingRequest);
     });
 
-    this.options.writeLine(payload);
+    try {
+      this.options.writeLine(payload);
+    } catch (error) {
+      this.pendingRequests.delete(id);
+      pendingRequest?.reject(asError(error, "App Server transport write failed"));
+    }
 
     return promise as Promise<T>;
   }
@@ -99,3 +115,11 @@ export class AppServerClient {
 }
 
 export type { AppServerNotification } from "./events.js";
+
+function asError(error: unknown, fallbackMessage: string): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(fallbackMessage);
+}

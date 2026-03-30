@@ -34,6 +34,23 @@ export function spawnAppServerProcess(
     crlfDelay: Infinity,
   });
   const listeners = new Set<(line: string) => void>();
+  const exitPromise = new Promise<number | null>((resolve, reject) => {
+    const handleExit = (code: number | null) => {
+      cleanup();
+      resolve(code);
+    };
+    const handleError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      child.off("exit", handleExit);
+      child.off("error", handleError);
+    };
+
+    child.once("exit", handleExit);
+    child.once("error", handleError);
+  });
 
   lineReader.on("line", (line) => {
     for (const listener of listeners) {
@@ -54,10 +71,7 @@ export function spawnAppServerProcess(
       };
     },
     waitForExit(): Promise<number | null> {
-      return new Promise((resolve, reject) => {
-        child.once("error", reject);
-        child.once("exit", (code) => resolve(code));
-      });
+      return exitPromise;
     },
   };
 }

@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import { spawnAppServerProcess } from "../src/app_server/process.js";
 
@@ -47,6 +48,31 @@ describe("spawnAppServerProcess", () => {
         unsubscribe();
         appServer.child.kill();
       }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the exit code even if the child exits before waitForExit is called", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-fast-exit-"));
+
+    try {
+      const scriptPath = join(tempDir, "fast-exit.mjs");
+      writeFileSync(scriptPath, "process.exit(5);\n", "utf8");
+
+      const appServer = spawnAppServerProcess([process.execPath, scriptPath], {
+        cwd: tempDir,
+      });
+
+      await delay(50);
+
+      const timeout = Symbol("timeout");
+      const result = await Promise.race([
+        appServer.waitForExit(),
+        delay(200, timeout),
+      ]);
+
+      expect(result).toBe(5);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

@@ -4,6 +4,13 @@ import {
   type AppServerNotification,
 } from "../src/app_server/client.js";
 
+function getPendingRequestCount(client: AppServerClient): number {
+  return (
+    (client as unknown as { pendingRequests: Map<string, unknown> }).pendingRequests
+      .size
+  );
+}
+
 describe("AppServerClient", () => {
   it("sends requests, correlates responses, and emits parsed notifications", async () => {
     const sent: string[] = [];
@@ -155,5 +162,37 @@ describe("AppServerClient", () => {
     client.handleLine('{"id":"1","result":{"threadId":"thread_123"}}');
 
     await expect(request).resolves.toEqual({ threadId: "thread_123" });
+  });
+
+  it("rejects and clears the pending request when transport writes fail synchronously", async () => {
+    const client = new AppServerClient({
+      writeLine: () => {
+        throw new Error("transport write failed");
+      },
+      createRequestId: () => "1",
+    });
+
+    await expect(client.threadStart({ prompt: "hello" })).rejects.toThrow(
+      "transport write failed",
+    );
+    expect(getPendingRequestCount(client)).toBe(0);
+  });
+
+  it("rejects all pending requests when the transport closes", async () => {
+    const sent: string[] = [];
+    let nextId = 1;
+    const client = new AppServerClient({
+      writeLine: (line) => sent.push(line),
+      createRequestId: () => String(nextId++),
+    });
+
+    const first = client.threadStart({ prompt: "first" });
+    const second = client.turnStart({ threadId: "thread_123", prompt: "second" });
+
+    client.failPendingRequests(new Error("transport closed"));
+
+    await expect(first).rejects.toThrow("transport closed");
+    await expect(second).rejects.toThrow("transport closed");
+    expect(getPendingRequestCount(client)).toBe(0);
   });
 });
