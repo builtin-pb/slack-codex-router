@@ -5,8 +5,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/bin/router.ts",
-    "test": "vitest run",
-    "coverage": "vitest run --coverage.enabled=true --coverage.provider=v8"
+    "test": "vitest run --config vitest.fast.config.ts",
+    "coverage": "vitest run --config vitest.fast.config.ts --coverage.enabled=true --coverage.provider=v8",
+    "test:real-integration": "vitest run --config vitest.real-integration.config.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.2.0",
