@@ -146,7 +146,7 @@ function loadProjects(projectsFile: string): Map<string, ProjectConfig> {
     const rawPath = project.path?.trim();
 
     if (!channelId || !name || !rawPath) {
-      continue;
+      throw new Error("Malformed project entry in project registry");
     }
 
     if (projects.has(channelId)) {

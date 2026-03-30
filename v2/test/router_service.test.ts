@@ -22,6 +22,23 @@ function createProjectRegistryFixture(): { cleanup(): void; projectDir: string; 
   };
 }
 
+function createRawProjectRegistryFixture(contents: string): {
+  cleanup(): void;
+  projectsFile: string;
+} {
+  const tempDir = mkdtempSync(join(tmpdir(), "router-service-raw-"));
+  const projectsFile = join(tempDir, "projects.yaml");
+
+  writeFileSync(projectsFile, contents, "utf8");
+
+  return {
+    cleanup() {
+      rmSync(tempDir, { recursive: true, force: true });
+    },
+    projectsFile,
+  };
+}
+
 describe("RouterService", () => {
   const cleanups: Array<() => void> = [];
 
@@ -158,5 +175,25 @@ describe("RouterService", () => {
     expect(threadStart).not.toHaveBeenCalled();
     expect(turnStart).not.toHaveBeenCalled();
     expect(replies).toEqual(["User is not allowed to control this router."]);
+  });
+
+  it("fails fast when the project registry contains malformed entries", () => {
+    const fixture = createRawProjectRegistryFixture(
+      "projects:\n  - channel_id: C08TEMPLATE\n    path: ./project\n",
+    );
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+
+    expect(
+      () =>
+        new RouterService({
+          allowedUserId: "U123",
+          projectsFile: fixture.projectsFile,
+          store,
+          threadStart: vi.fn(),
+          turnStart: vi.fn(),
+        }),
+    ).toThrow("Malformed project entry in project registry");
   });
 });
