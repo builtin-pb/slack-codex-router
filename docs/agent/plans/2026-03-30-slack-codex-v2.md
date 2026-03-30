@@ -396,7 +396,7 @@ Run: `npm --prefix v2 test -- test/config.test.ts`
 Expected: `2 passed`
 
 - [x] **Step 5: Commit**
-Observed: Created commit `88218c3` with the requested message `feat: bootstrap slack codex router v2 workspace`, containing the v2 workspace bootstrap files and the Task 1 plan log update.
+Observed: Created commit `b79d174` with the requested message `fix: align v2 bootstrap with root env`, updating the v2 bootstrap to load the repo-root `.env` by default, honor the `SCR_*` aliases, and parse quoted app-server commands safely.
 
 ```bash
 git add v2/package.json v2/tsconfig.json v2/.env.example v2/src/config.ts v2/src/bin/router.ts v2/test/config.test.ts
