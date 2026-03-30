@@ -142,20 +142,24 @@ git commit -m "refactor: archive python router as legacy v1"
 - Create: `v2/test/config.test.ts`
 
 - [x] **Step 1: Write the failing config test**
-Observed: Added `v2/test/config.test.ts` first, using the current root Slack user-id contract (`SLACK_ALLOWED_USER_ID`) so the loader can stay compatible with the existing env layout while still accepting the stale `ALLOWED_SLACK_USER_ID` alias.
+Observed: Added `v2/test/config.test.ts` first, covering the current root Slack user-id contract plus the repo-root `SCR_PROJECTS_FILE` and `SCR_STATE_DB` aliases, and adding a quoted-command case so the parser behavior is pinned down.
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config";
+import { loadConfig } from "../src/config.js";
 
 describe("loadConfig", () => {
-  it("loads the existing Slack env contract plus v2 defaults", () => {
+  const baseEnv = {
+    SLACK_BOT_TOKEN: "xoxb-test",
+    SLACK_APP_TOKEN: "xapp-test",
+    SLACK_ALLOWED_USER_ID: "U123",
+  };
+
+  it("loads the Slack env contract and v2 defaults from repo-root aliases", () => {
     const config = loadConfig({
-      SLACK_BOT_TOKEN: "xoxb-test",
-      SLACK_APP_TOKEN: "xapp-test",
-      ALLOWED_SLACK_USER_ID: "U123",
-      PROJECTS_FILE: "config/projects.example.yaml",
-      ROUTER_STATE_DB: "tmp/router-v2.sqlite3",
+      ...baseEnv,
+      SCR_PROJECTS_FILE: "config/projects.example.yaml",
+      SCR_STATE_DB: "tmp/router-v2.sqlite3",
     });
 
     expect(config.slackBotToken).toBe("xoxb-test");
@@ -164,6 +168,22 @@ describe("loadConfig", () => {
     expect(config.projectsFile).toContain("config/projects.example.yaml");
     expect(config.routerStateDb).toContain("tmp/router-v2.sqlite3");
     expect(config.appServerCommand).toEqual(["codex", "app-server"]);
+  });
+
+  it("parses quoted app-server commands", () => {
+    const config = loadConfig({
+      ...baseEnv,
+      SCR_PROJECTS_FILE: "config/projects.example.yaml",
+      SCR_STATE_DB: "tmp/router-v2.sqlite3",
+      CODEX_APP_SERVER_COMMAND: 'codex app-server --label "My Project"',
+    });
+
+    expect(config.appServerCommand).toEqual([
+      "codex",
+      "app-server",
+      "--label",
+      "My Project",
+    ]);
   });
 });
 ```
@@ -175,7 +195,7 @@ Run: `npm --prefix v2 test -- v2/test/config.test.ts`
 Expected: fail because `v2/package.json` and `src/config.ts` do not exist yet.
 
 - [x] **Step 3: Create the minimal workspace and config loader**
-Observed: Created `v2/package.json`, `v2/tsconfig.json`, `v2/.env.example`, `v2/src/config.ts`, `v2/src/bin/router.ts`, `v2/package-lock.json`, and `v2/.gitignore`; the loader now prefers `SLACK_ALLOWED_USER_ID` and falls back to `ALLOWED_SLACK_USER_ID`, and `npm --prefix v2 install` completed successfully.
+Observed: Created `v2/package.json`, `v2/tsconfig.json`, `v2/.env.example`, `v2/src/config.ts`, `v2/src/bin/router.ts`, `v2/package-lock.json`, and `v2/.gitignore`; the loader now prefers `SLACK_ALLOWED_USER_ID`, falls back to `ALLOWED_SLACK_USER_ID`, accepts `SCR_PROJECTS_FILE` and `SCR_STATE_DB` as repo-root aliases, and `npm --prefix v2 install` completed successfully.
 
 ```json
 {
@@ -216,19 +236,164 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RouterConfig {
   return {
     slackBotToken: requireEnv(env, "SLACK_BOT_TOKEN"),
     slackAppToken: requireEnv(env, "SLACK_APP_TOKEN"),
-    allowedUserId: requireEnv(env, "ALLOWED_SLACK_USER_ID"),
-    projectsFile: env.PROJECTS_FILE ?? "config/projects.yaml",
-    routerStateDb: env.ROUTER_STATE_DB ?? "logs/router-v2/state.sqlite3",
-    appServerCommand: (env.CODEX_APP_SERVER_COMMAND ?? "codex app-server").split(" "),
+    allowedUserId: requireAnyEnv(env, [
+      "SLACK_ALLOWED_USER_ID",
+      "ALLOWED_SLACK_USER_ID",
+    ]),
+    projectsFile: optionalAnyEnv(env, [
+      "PROJECTS_FILE",
+      "SCR_PROJECTS_FILE",
+    ], "config/projects.yaml"),
+    routerStateDb: optionalAnyEnv(env, [
+      "ROUTER_STATE_DB",
+      "SCR_STATE_DB",
+    ], "logs/router-v2/state.sqlite3"),
+    appServerCommand: parseCommand(
+      env.CODEX_APP_SERVER_COMMAND ?? "codex app-server",
+    ),
   };
+}
+
+function requireEnv(env: NodeJS.ProcessEnv, key: string): string {
+  const value = env[key];
+  if (value && value.trim().length > 0) {
+    return value;
+  }
+
+  throw new Error(`Missing required environment variable: ${key}`);
+}
+
+function requireAnyEnv(env: NodeJS.ProcessEnv, keys: string[]): string {
+  for (const key of keys) {
+    const value = env[key];
+    if (value && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  throw new Error(
+    `Missing required environment variable: one of ${keys.join(", ")}`,
+  );
+}
+
+function optionalAnyEnv(
+  env: NodeJS.ProcessEnv,
+  keys: string[],
+  defaultValue: string,
+): string {
+  for (const key of keys) {
+    const value = env[key];
+    if (value && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return defaultValue;
+}
+
+function parseCommand(command: string): string[] {
+  const args: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let escaping = false;
+
+  for (const char of command.trim()) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (quote === "'") {
+      if (char === "'") {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (quote === '"') {
+      if (char === '"') {
+        quote = null;
+      } else if (char === "\\") {
+        escaping = true;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        args.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaping) {
+    throw new Error("Unterminated escape in CODEX_APP_SERVER_COMMAND");
+  }
+
+  if (quote !== null) {
+    throw new Error("Unterminated quote in CODEX_APP_SERVER_COMMAND");
+  }
+
+  if (current.length > 0) {
+    args.push(current);
+  }
+
+  return args;
+}
+```
+
+```ts
+import { config as loadDotenv } from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadConfig } from "../config.js";
+
+const routerDir = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(routerDir, "../../..");
+const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? resolve(repoRoot, ".env");
+
+loadDotenv({ path: dotenvPath });
+
+export function main(): void {
+  const config = loadConfig();
+  console.log(
+    `v2 router bootstrap ready for ${config.allowedUserId} with ${config.projectsFile}`,
+  );
+}
+
+const isMain =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isMain) {
+  main();
 }
 ```
 
 - [x] **Step 4: Run the config test**
-Observed: `npm --prefix v2 test -- test/config.test.ts` passed (`1 test`), and `npm --prefix v2 run build` also succeeded with `tsc -p tsconfig.json`.
+Observed: `npm --prefix v2 test -- test/config.test.ts` passed (`2 tests`), and `npm --prefix v2 run build` also succeeded with `tsc -p tsconfig.json`.
 
-Run: `npm --prefix v2 test -- v2/test/config.test.ts`  
-Expected: `1 passed`
+Run: `npm --prefix v2 test -- test/config.test.ts`  
+Expected: `2 passed`
 
 - [x] **Step 5: Commit**
 Observed: Created commit `88218c3` with the requested message `feat: bootstrap slack codex router v2 workspace`, containing the v2 workspace bootstrap files and the Task 1 plan log update.
