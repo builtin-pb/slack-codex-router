@@ -53,7 +53,7 @@ describe("router bootstrap", () => {
 
       try {
         const { main } = await import("../src/bin/router.js");
-        main();
+        await expect(main()).rejects.toThrow("projects file is missing");
       } finally {
         console.log = originalLog;
       }

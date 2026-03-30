@@ -22,7 +22,7 @@ export async function main(): Promise<void> {
   );
 
   if (!existsSync(config.projectsFile)) {
-    return;
+    throw new Error(`Router projects file is missing: ${config.projectsFile}`);
   }
 
   const store = new RouterStore(config.routerStateDb);
