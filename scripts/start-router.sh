@@ -15,4 +15,4 @@ fi
 
 cd "$ROOT_DIR"
 npm --prefix "$ROOT_DIR/v2" run build >/dev/null
-exec node "$ROOT_DIR/v2/dist/bin/launcher.js" "$@"
+exec node "$ROOT_DIR/v2/dist/src/bin/launcher.js" "$@"

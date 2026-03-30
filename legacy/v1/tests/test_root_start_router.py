@@ -31,15 +31,15 @@ def test_root_start_router_defaults_to_v2_and_only_uses_legacy_when_explicitly_r
 
     (v2_dir / "package.json").write_text('{"name":"slack-codex-router-v2"}\n', encoding="utf-8")
     _write_executable(legacy_scripts_dir / "start-router-v1.sh", "#!/bin/sh\nprintf 'legacy wrapper invoked %s\\n' \"$*\"\n")
-    (v2_dir / "dist" / "bin").mkdir(parents=True)
-    (v2_dir / "dist" / "bin" / "launcher.js").write_text(
+    (v2_dir / "dist" / "src" / "bin").mkdir(parents=True)
+    (v2_dir / "dist" / "src" / "bin" / "launcher.js").write_text(
         "console.log(`v2 launcher invoked ${process.argv.slice(2).join(' ')}`.trim())\n",
         encoding="utf-8",
     )
     _write_executable(fake_bin_dir / "npm", "#!/bin/sh\nexit 0\n")
     _write_executable(
         fake_bin_dir / "node",
-        "#!/bin/sh\nshift\nprintf 'v2 launcher invoked %s\\n' \"$*\"\n",
+        "#!/bin/sh\nscript_path=\"$1\"\nshift\n[ -f \"$script_path\" ] || { printf 'missing launcher %s\\n' \"$script_path\" >&2; exit 1; }\nprintf 'v2 launcher invoked %s\\n' \"$*\"\n",
     )
 
     env = {

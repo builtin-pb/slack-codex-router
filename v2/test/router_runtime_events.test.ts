@@ -157,6 +157,7 @@ describe("startRouterRuntime event bridge", () => {
       routerService: {},
       registerSlackMessageHandler: harness.registerSlackMessageHandler,
     });
+    harness.upsertThread.mockClear();
 
     harness.notifications[0]?.({
       method: "thread/status/changed",
@@ -173,6 +174,47 @@ describe("startRouterRuntime event bridge", () => {
       state: "running",
     });
     expect(harness.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("maps nested active thread status notifications onto running state", async () => {
+    const harness = makeRuntimeHarness();
+
+    await startRouterRuntime({
+      config: {
+        slackBotToken: "xoxb-test",
+        slackAppToken: "xapp-test",
+        allowedUserId: "U123",
+        projectsFile: "/repo/config/projects.yaml",
+        routerStateDb: "/repo/logs/router-v2.sqlite3",
+        appServerCommand: ["codex", "app-server"],
+      },
+      store: harness.store,
+      appServerProcess: {
+        writeLine: vi.fn(),
+        onLine: vi.fn().mockReturnValue(() => {}),
+        waitForExit: vi.fn().mockResolvedValue(0),
+      },
+      appServerClient: harness.appServerClient,
+      slackApp: harness.slackApp,
+      routerService: {},
+      registerSlackMessageHandler: harness.registerSlackMessageHandler,
+    });
+    harness.upsertThread.mockClear();
+
+    harness.notifications[0]?.({
+      method: "thread/status/changed",
+      params: {
+        threadId: "thread_abc",
+        status: { type: "active" },
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(harness.upsertThread).toHaveBeenCalledWith({
+      ...harness.threadRecord,
+      state: "running",
+    });
   });
 
   it("clears stale active turn ids when the app server marks the thread idle", async () => {

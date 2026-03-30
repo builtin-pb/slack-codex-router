@@ -84,6 +84,16 @@ function readThreadState(params: Record<string, unknown>): ThreadState | null {
     case "failed_setup":
       return params.state;
     default:
+      break;
+  }
+
+  const status = readRecord(params.status);
+  switch (status?.type) {
+    case "idle":
+      return "idle";
+    case "active":
+      return "running";
+    default:
       return null;
   }
 }

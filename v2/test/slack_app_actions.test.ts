@@ -14,6 +14,36 @@ type ActionListenerArgs = {
 };
 
 describe("registerSlackMessageHandler actions", () => {
+  it("binds action registration to the original app instance", () => {
+    const actionMatchers: Array<string | RegExp> = [];
+    const app = {
+      listeners: actionMatchers,
+      event: vi.fn(),
+      action(this: { listeners: Array<string | RegExp> }, matcher: string | RegExp) {
+        this.listeners.push(matcher);
+      },
+    };
+
+    expect(() =>
+      registerSlackMessageHandler(
+        app,
+        {
+          handleSlackMessage: vi.fn(),
+          interruptThread: vi.fn(),
+          submitChoice: vi.fn(),
+          startReview: vi.fn(),
+          restartRouter: vi.fn(),
+          mergeToMain: vi.fn(),
+          confirmMergeToMain: vi.fn(),
+          getThreadStatus: vi.fn(),
+        } as unknown as RouterService,
+      ),
+    ).not.toThrow();
+
+    expect(actionMatchers).toContain("status");
+    expect(actionMatchers).toContain("restart_router");
+  });
+
   it("registers live handlers for every rendered thread control", () => {
     const actionMatchers: Array<string | RegExp> = [];
 

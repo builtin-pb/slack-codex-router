@@ -10,9 +10,17 @@ export type RouterConfig = {
   appServerCommand: string[];
 };
 
-export const repoRootPath = resolve(
+export function resolveRepoRootPathFromModuleDir(moduleDir: string): string {
+  const packageRoot =
+    moduleDir.endsWith("/dist/src") || moduleDir.endsWith("\\dist\\src")
+      ? resolve(moduleDir, "../..")
+      : resolve(moduleDir, "..");
+
+  return resolve(packageRoot, "..");
+}
+
+export const repoRootPath = resolveRepoRootPathFromModuleDir(
   dirname(fileURLToPath(import.meta.url)),
-  "../..",
 );
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RouterConfig {

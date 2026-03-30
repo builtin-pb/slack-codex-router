@@ -29,6 +29,8 @@ describe("AppServerClient", () => {
     const initialize = client.initialize();
     expect(sent[0]).toContain('"id":"1"');
     expect(sent[0]).toContain('"method":"initialize"');
+    expect(sent[0]).toContain('"clientInfo"');
+    expect(sent[0]).toContain('"name":"slack-codex-router"');
 
     client.handleLine('{"id":"1","result":{}}');
     await expect(initialize).resolves.toBeUndefined();
@@ -41,7 +43,9 @@ describe("AppServerClient", () => {
     client.handleLine(
       '{"method":"thread/status/changed","params":{"threadId":"thread_123","state":"running"}}',
     );
-    client.handleLine('{"id":"2","result":{"threadId":"thread_123"}}');
+    client.handleLine(
+      '{"id":"2","result":{"thread":{"id":"thread_123","cwd":"/repo"}}}',
+    );
 
     await expect(threadStart).resolves.toEqual({ threadId: "thread_123" });
     expect(notifications).toEqual([
@@ -80,12 +84,18 @@ describe("AppServerClient", () => {
     expect(sent[0]).toContain('"method":"turn/start"');
     expect(sent[1]).toContain('"method":"turn/steer"');
     expect(sent[2]).toContain('"method":"turn/interrupt"');
+    expect(sent[0]).toContain('"input"');
+    expect(sent[0]).toContain('"type":"text"');
+    expect(sent[0]).toContain('"text":"go"');
+    expect(sent[1]).toContain('"expectedTurnId":"turn_123"');
+    expect(sent[1]).toContain('"input"');
+    expect(sent[1]).toContain('"text":"adjust"');
     expect(sent[2]).toContain('"threadId":"thread_123"');
     expect(sent[2]).toContain('"turnId":"turn_123"');
     expect(sent[3]).toContain('"method":"review/start"');
     expect(sent[3]).toContain('"type":"uncommittedChanges"');
 
-    client.handleLine('{"id":"1","result":{"turnId":"turn_123"}}');
+    client.handleLine('{"id":"1","result":{"turn":{"id":"turn_123"}}}');
     client.handleLine(
       '{"id":"2","error":{"code":400,"message":"cannot steer finished turn"}}',
     );

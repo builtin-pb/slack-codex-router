@@ -49,6 +49,6 @@ export function registerSlackMessageHandler(
     });
   });
   if (app.action) {
-    registerThreadControlActions({ action: app.action }, router, options);
+    registerThreadControlActions({ action: app.action.bind(app) }, router, options);
   }
 }

@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, resolveRepoRootPathFromModuleDir } from "../src/config.js";
 
 describe("loadConfig", () => {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -35,6 +35,15 @@ describe("loadConfig", () => {
     expect(config.routerStateDb).toBe(
       resolve(repoRoot, "logs/router-v2/state.sqlite3"),
     );
+  });
+
+  it("derives the repo root from both source and compiled module directories", () => {
+    expect(resolveRepoRootPathFromModuleDir(resolve(repoRoot, "v2", "src"))).toBe(
+      repoRoot,
+    );
+    expect(
+      resolveRepoRootPathFromModuleDir(resolve(repoRoot, "v2", "dist", "src")),
+    ).toBe(repoRoot);
   });
 
   it("parses quoted app-server commands", () => {

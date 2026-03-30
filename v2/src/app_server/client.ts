@@ -13,6 +13,13 @@ type PendingRequest = {
   reject(error: Error): void;
 };
 
+type RequestParams = Record<string, unknown>;
+
+const CLIENT_INFO = {
+  name: "slack-codex-router",
+  version: "0.1.0",
+} as const;
+
 export class AppServerClient {
   readonly events = new AppServerEventStream();
 
@@ -22,19 +29,28 @@ export class AppServerClient {
   constructor(private readonly options: AppServerClientOptions) {}
 
   async initialize(): Promise<void> {
-    await this.sendRequest("initialize", {});
+    await this.sendRequest("initialize", { clientInfo: CLIENT_INFO });
   }
 
-  threadStart(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.sendRequest("thread/start", input);
+  async threadStart(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const result = await this.sendRequest<Record<string, unknown>>("thread/start", input);
+    return normalizeThreadStartResult(result);
   }
 
-  turnStart(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.sendRequest("turn/start", input);
+  async turnStart(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const result = await this.sendRequest<Record<string, unknown>>(
+      "turn/start",
+      normalizeTurnStartParams(input),
+    );
+    return normalizeTurnResult(result);
   }
 
-  turnSteer(input: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.sendRequest("turn/steer", input);
+  async turnSteer(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const result = await this.sendRequest<Record<string, unknown>>(
+      "turn/steer",
+      normalizeTurnSteerParams(input),
+    );
+    return normalizeTurnResult(result);
   }
 
   async turnInterrupt(input: Record<string, unknown>): Promise<void> {
@@ -119,6 +135,68 @@ export class AppServerClient {
 }
 
 export type { AppServerNotification } from "./events.js";
+
+function normalizeThreadStartResult(result: Record<string, unknown>): Record<string, unknown> {
+  const threadId = readNestedId(result, "thread");
+  if (!threadId) {
+    return result;
+  }
+
+  return { threadId };
+}
+
+function normalizeTurnResult(result: Record<string, unknown>): Record<string, unknown> {
+  const turnId = readNestedId(result, "turn");
+  if (!turnId) {
+    return result;
+  }
+
+  return { turnId };
+}
+
+function normalizeTurnStartParams(input: RequestParams): RequestParams {
+  return {
+    ...normalizeTextInputParams(input),
+  };
+}
+
+function normalizeTurnSteerParams(input: RequestParams): RequestParams {
+  const normalized = normalizeTextInputParams(input);
+  const turnId = typeof normalized.turnId === "string" ? normalized.turnId : undefined;
+
+  if (turnId && typeof normalized.expectedTurnId !== "string") {
+    normalized.expectedTurnId = turnId;
+  }
+
+  delete normalized.turnId;
+  return normalized;
+}
+
+function normalizeTextInputParams(input: RequestParams): RequestParams {
+  const normalized: RequestParams = { ...input };
+  const prompt = typeof normalized.prompt === "string" ? normalized.prompt : undefined;
+
+  if (prompt && !Array.isArray(normalized.input)) {
+    normalized.input = [{ type: "text", text: prompt }];
+  }
+
+  delete normalized.prompt;
+  return normalized;
+}
+
+function readNestedId(
+  result: Record<string, unknown>,
+  key: "thread" | "turn",
+): string | null {
+  const value = result[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return typeof (value as { id?: unknown }).id === "string"
+    ? (value as { id: string }).id
+    : null;
+}
 
 function asError(error: unknown, fallbackMessage: string): Error {
   if (error instanceof Error) {

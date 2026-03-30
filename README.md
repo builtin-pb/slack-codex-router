@@ -4,7 +4,7 @@ This repository now boots the Node/TypeScript `v2` router by default:
 
 - `legacy/v1` contains the archived Python router.
 - `v2` is the active router implementation.
-- `scripts/start-router.sh` builds `v2` and launches `v2/dist/bin/launcher.js`.
+- `scripts/start-router.sh` builds `v2` and launches `v2/dist/src/bin/launcher.js`.
 - `legacy/v1/scripts/start-router-v1.sh` remains available as the fallback path.
 
 ## Setup
@@ -37,7 +37,7 @@ Start the launcher through the root wrapper:
 scripts/start-router.sh
 ```
 
-The wrapper builds `v2`, then starts `node v2/dist/bin/launcher.js`.
+The wrapper builds `v2`, then starts `node v2/dist/src/bin/launcher.js`.
 
 ## Restart Behavior
 
