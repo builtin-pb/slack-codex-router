@@ -411,7 +411,8 @@ git commit -m "feat: bootstrap slack codex router v2 workspace"
 - Create: `v2/src/persistence/store.ts`
 - Create: `v2/test/store.test.ts`
 
-- [ ] **Step 1: Write the failing store test**
+- [x] **Step 1: Write the failing store test**
+Observed: Added `v2/test/store.test.ts` first, covering thread routing, worktree metadata, and pending restart intent before any persistence code existed.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -446,12 +447,14 @@ describe("RouterStore", () => {
 });
 ```
 
-- [ ] **Step 2: Run the store test**
+- [x] **Step 2: Run the store test**
+Observed: `npm --prefix v2 test -- test/store.test.ts` failed with `Cannot find module '../src/persistence/store.js'`, which was the expected red state because the persistence layer had not been created yet.
 
 Run: `npm --prefix v2 test -- v2/test/store.test.ts`  
 Expected: fail because `RouterStore` and schema tables do not exist yet.
 
-- [ ] **Step 3: Implement the schema and store**
+- [x] **Step 3: Implement the schema and store**
+Observed: Added `v2/src/domain/types.ts`, `v2/src/persistence/schema.ts`, and `v2/src/persistence/store.ts` with SQLite-backed `threads`, `slack_messages`, `interactive_prompts`, and `restart_intents` tables plus `RouterStore` methods for upsert, lookup, recovery listing, and restart-intent lifecycle.
 
 ```ts
 export type ThreadRecord = {
@@ -490,7 +493,8 @@ export class RouterStore {
 }
 ```
 
-- [ ] **Step 4: Run the store test**
+- [x] **Step 4: Run the store test**
+Observed: `npm --prefix v2 test -- test/store.test.ts` passed (`2 tests`), and `npm --prefix v2 run build` passed after switching the store to a local runtime interface for `better-sqlite3`.
 
 Run: `npm --prefix v2 test -- v2/test/store.test.ts`  
 Expected: `1 passed`
