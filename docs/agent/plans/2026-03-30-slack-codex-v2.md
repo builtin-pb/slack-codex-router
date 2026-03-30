@@ -520,7 +520,8 @@ git commit -m "feat: add v2 persistence schema"
 - Create: `v2/src/runtime/restart.ts`
 - Create: `v2/test/launcher.test.ts`
 
-- [ ] **Step 1: Write the failing launcher test**
+- [x] **Step 1: Write the failing launcher test**
+Observed: Added `v2/test/launcher.test.ts` first, keeping the Task 3 contract focused on a single graceful-restart cycle where the first worker exits with the dedicated restart code and the second worker exits normally.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -543,12 +544,14 @@ describe("buildLauncher", () => {
 });
 ```
 
-- [ ] **Step 2: Run the launcher test**
+- [x] **Step 2: Run the launcher test**
+Observed: The literal plan command `npm --prefix v2 test -- v2/test/launcher.test.ts` did not match Vitest's path resolution under `--prefix v2` and returned `No test files found`; rerunning as `npm --prefix v2 test -- test/launcher.test.ts` produced the intended red state with `Cannot find module '../src/runtime/launcher.js'`.
 
 Run: `npm --prefix v2 test -- v2/test/launcher.test.ts`  
 Expected: fail because no launcher exists.
 
-- [ ] **Step 3: Implement a function-agnostic launcher**
+- [x] **Step 3: Implement a function-agnostic launcher**
+Observed: Added `v2/src/runtime/restart.ts` with the dedicated restart exit-code contract, `v2/src/runtime/launcher.ts` with the minimal spawn/wait/restart loop, and `v2/src/bin/launcher.ts` as a tiny CLI wrapper that only spawns the router worker and inherits stdio.
 
 ```ts
 export const RESTART_EXIT_CODE = 75;
@@ -579,7 +582,8 @@ export function buildLauncher(deps: {
 // Only spawn, wait, and restart. Do not read Slack state here.
 ```
 
-- [ ] **Step 4: Run the launcher test**
+- [x] **Step 4: Run the launcher test**
+Observed: `npm --prefix v2 test -- test/launcher.test.ts` passed with `1 passed`; additional required verification also succeeded with `npm --prefix v2 run build` after correcting the invalid bare `npm --prefix v2 build` invocation.
 
 Run: `npm --prefix v2 test -- v2/test/launcher.test.ts`  
 Expected: `1 passed`
