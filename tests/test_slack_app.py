@@ -1,3 +1,4 @@
+import io
 import threading
 from pathlib import Path
 
@@ -151,6 +152,21 @@ class ExplodingCommands:
 
     def show_diff(self, project_path: Path) -> str:
         raise AssertionError("unexpected show diff call")
+
+
+class FakeDownloadResponse(io.BytesIO):
+    def __init__(self, payload: bytes, *, content_type: str) -> None:
+        super().__init__(payload)
+        self.headers = {"Content-Type": content_type}
+
+    def info(self):
+        return self.headers
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
 
 def test_top_level_message_starts_new_thread_and_follow_up_resumes(tmp_path: Path) -> None:
@@ -908,3 +924,140 @@ def test_image_only_follow_up_uses_default_prompt_and_downloaded_images(tmp_path
         ("C123", "1710000000.100000", "1710000000.100000"),
         ("C123", "1710000000.100000", "1710000001.100000"),
     ]
+
+
+def test_download_file_saves_image_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=ProjectRegistry({}),
+        manager=object(),  # type: ignore[arg-type]
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    destination = tmp_path / "router-logs" / "slack-inputs" / "image.png"
+
+    def fake_urlopen(request):
+        assert request.full_url == "https://files.slack.com/files-pri/T/F/image.png"
+        assert request.headers["Authorization"] == "Bearer xoxb-test"
+        return FakeDownloadResponse(b"\x89PNG\r\n\x1a\npng-bytes", content_type="image/png")
+
+    monkeypatch.setattr(slack_app_module, "urlopen", fake_urlopen)
+
+    router._download_file("https://files.slack.com/files-pri/T/F/image.png", destination)
+
+    assert destination.read_bytes() == b"\x89PNG\r\n\x1a\npng-bytes"
+
+
+def test_download_file_rejects_html_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=ProjectRegistry({}),
+        manager=object(),  # type: ignore[arg-type]
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    destination = tmp_path / "router-logs" / "slack-inputs" / "image.png"
+
+    monkeypatch.setattr(
+        slack_app_module,
+        "urlopen",
+        lambda request: FakeDownloadResponse(
+            b"<!DOCTYPE html><html><body>login</body></html>",
+            content_type="text/html; charset=utf-8",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Expected image response"):
+        router._download_file("https://files.slack.com/files-pri/T/F/image.png", destination)
+
+    assert not destination.exists()
+
+
+def test_download_file_rejects_html_body_even_with_image_content_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=ProjectRegistry({}),
+        manager=object(),  # type: ignore[arg-type]
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    destination = tmp_path / "router-logs" / "slack-inputs" / "image.png"
+
+    monkeypatch.setattr(
+        slack_app_module,
+        "urlopen",
+        lambda request: FakeDownloadResponse(
+            b"<!DOCTYPE html><html><body>login</body></html>",
+            content_type="image/png",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="Expected image bytes"):
+        router._download_file("https://files.slack.com/files-pri/T/F/image.png", destination)
+
+    assert not destination.exists()
+
+
+def test_image_only_message_reports_invalid_download_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    runner = FakeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=registry,
+        manager=manager,
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    replies: list[str] = []
+
+    monkeypatch.setattr(
+        slack_app_module,
+        "urlopen",
+        lambda request: FakeDownloadResponse(
+            b"<!DOCTYPE html><html><body>login</body></html>",
+            content_type="text/html; charset=utf-8",
+        ),
+    )
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "subtype": "file_share",
+            "text": "",
+            "files": [
+                {
+                    "id": "F1",
+                    "name": "image.png",
+                    "mimetype": "image/png",
+                    "url_private_download": "https://files.slack.com/files-pri/T/F/image.png",
+                }
+            ],
+        },
+        replies.append,
+    )
+
+    assert replies == ["Could not read attached image: Expected image response from Slack download URL, got 'text/html; charset=utf-8'."]
+    assert runner.start_calls == []

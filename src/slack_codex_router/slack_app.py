@@ -236,8 +236,26 @@ class SlackRouter:
 
     def _download_file(self, url: str, destination: Path) -> None:
         request = Request(url, headers={"Authorization": f"Bearer {self._bot_token}"})
-        with urlopen(request) as response, destination.open("wb") as handle:
-            shutil.copyfileobj(response, handle)
+        with urlopen(request) as response:
+            content_type = str(getattr(response, "headers", {}).get("Content-Type") or "")
+            if content_type and not content_type.startswith("image/"):
+                raise RuntimeError(
+                    f"Expected image response from Slack download URL, got '{content_type}'."
+                )
+
+            prefix = response.read(512)
+            if self._looks_like_html(prefix):
+                raise RuntimeError("Expected image bytes from Slack download URL, got HTML content instead.")
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with destination.open("wb") as handle:
+                handle.write(prefix)
+                shutil.copyfileobj(response, handle)
+
+    @staticmethod
+    def _looks_like_html(payload: bytes) -> bool:
+        snippet = payload.lstrip()[:32].lower()
+        return snippet.startswith(b"<!doctype html") or snippet.startswith(b"<html")
 
     def start_completion_watch(
         self,
