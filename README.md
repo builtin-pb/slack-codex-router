@@ -23,34 +23,24 @@ The first copy command gives you a complete environment template to fill in loca
 
 ## Run
 
-Run in the foreground:
+Start or restart the background service in one command:
 
 ```bash
-uv run python -m slack_codex_router.main run
+scripts/start-router.sh
 ```
 
 ## launchd
 
-1. Create the log directory launchd writes into:
+1. Make the startup wrapper executable:
 
 ```bash
-mkdir -p logs
+chmod +x scripts/start-router.sh
 ```
 
-2. Make the wrapper executable:
+2. Start or restart it:
 
 ```bash
-chmod +x scripts/run-router.sh
+scripts/start-router.sh
 ```
 
-3. Load the service into your user launchd session:
-
-```bash
-launchctl bootstrap gui/$(id -u) ops/com.builtin.pb.slack-codex-router.plist
-```
-
-4. Start or restart it immediately:
-
-```bash
-launchctl kickstart -k gui/$(id -u)/com.builtin.pb.slack-codex-router
-```
+The wrapper installs or refreshes the LaunchAgent in `~/Library/LaunchAgents`, loads the required environment variables from `.env`, and starts the router under `launchd`.
