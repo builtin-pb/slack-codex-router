@@ -70,4 +70,24 @@ describe("WorktreeManager", () => {
 
     expect(run).toHaveBeenCalledTimes(1);
   });
+
+  it("still fails when the path appears but the git error is unrelated to an existing worktree race", async () => {
+    let exists = false;
+    const run = vi.fn().mockImplementation(async () => {
+      exists = true;
+      throw new Error("fatal: could not lock config file");
+    });
+    const manager = new WorktreeManager({
+      pathExists: () => exists,
+      run,
+    });
+
+    await expect(
+      manager.ensureThreadWorktree({
+        repoPath: "/repo/project",
+        slackThreadTs: "1710000000.0001",
+        baseBranch: "main",
+      }),
+    ).rejects.toThrow("fatal: could not lock config file");
+  });
 });

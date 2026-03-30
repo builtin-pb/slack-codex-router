@@ -91,6 +91,17 @@ describe("startRouterRuntime", () => {
       text: "Router restarted. Recovered 1 thread mapping(s).",
       thread_ts: "1710000000.0001",
     });
+    expect(upsertThread).toHaveBeenCalledWith({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_abc",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "interrupted",
+      worktreePath: "/tmp/wt",
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
     expect(clearRestartIntent).toHaveBeenCalledTimes(1);
 
     await waitForExit.mock.results[0]?.value;

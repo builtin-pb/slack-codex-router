@@ -187,6 +187,7 @@ describe("startRouterRuntime regressions", () => {
       routerService: {},
       registerSlackMessageHandler: harness.registerSlackMessageHandler,
     });
+    harness.upsertThread.mockClear();
 
     currentThreads.length = 0;
 

@@ -119,6 +119,39 @@ export class RouterService {
 
     const existingThread = this.options.store.getThread(input.channelId, input.threadTs);
     if (existingThread) {
+      if (existingThread.appServerSessionStale) {
+        const reboundThread = await this.options.threadStart({
+          cwd: existingThread.worktreePath,
+        });
+        const reboundRecord = {
+          ...existingThread,
+          appServerThreadId: reboundThread.threadId,
+          activeTurnId: null,
+          appServerSessionStale: false,
+          state: "running" as const,
+        };
+        this.options.store.upsertThread(reboundRecord);
+
+        let turn: Record<string, unknown>;
+        try {
+          turn = await this.options.turnStart({
+            cwd: existingThread.worktreePath,
+            prompt,
+            threadId: reboundThread.threadId,
+          });
+        } catch (error) {
+          this.options.store.upsertThread(existingThread);
+          throw error;
+        }
+
+        this.options.store.upsertThread({
+          ...reboundRecord,
+          activeTurnId: readTurnId(turn),
+        });
+        await input.reply(renderContinuedTask(project.name));
+        return;
+      }
+
       if (existingThread.state === "running") {
         await input.reply(renderRunningTurn());
         return;
@@ -127,6 +160,7 @@ export class RouterService {
       const provisionalThread = {
         ...existingThread,
         activeTurnId: null,
+        appServerSessionStale: false,
         state: "running" as const,
       };
       this.options.store.upsertThread(provisionalThread);
@@ -203,6 +237,7 @@ export class RouterService {
   ): Promise<void> {
     this.requireAuthorizedUser(userId);
     const thread = this.requireThread(slackChannelId, slackThreadTs);
+    this.requireLiveSession(thread);
     if (thread.state !== "running") {
       throw new Error("This Slack thread is not running an interruptible turn.");
     }
@@ -239,6 +274,7 @@ export class RouterService {
     }
 
     const thread = this.requireThread(slackChannelId, slackThreadTs);
+    this.requireLiveSession(thread);
     if (thread.state !== "awaiting_user_input") {
       throw new Error("This Slack thread is not waiting for a choice.");
     }
@@ -246,6 +282,7 @@ export class RouterService {
     this.options.store.upsertThread({
       ...thread,
       activeTurnId: null,
+      appServerSessionStale: false,
       state: "running",
     });
 
@@ -264,6 +301,7 @@ export class RouterService {
     this.options.store.upsertThread({
       ...thread,
       activeTurnId: readTurnId(turn),
+      appServerSessionStale: false,
       state: "running",
     });
   }
@@ -275,6 +313,7 @@ export class RouterService {
   ): Promise<void> {
     this.requireAuthorizedUser(userId);
     const thread = this.requireThread(slackChannelId, slackThreadTs);
+    this.requireLiveSession(thread);
     if (thread.state !== "idle") {
       throw new Error("This Slack thread is not ready for review.");
     }
@@ -290,6 +329,7 @@ export class RouterService {
     this.options.store.upsertThread({
       ...thread,
       activeTurnId: readTurnId(review),
+      appServerSessionStale: false,
       state: "running",
     });
   }
@@ -344,6 +384,9 @@ export class RouterService {
     if (thread.state !== "idle") {
       throw new Error("This Slack thread is not ready to preview a merge.");
     }
+    if (thread.branchName === thread.baseBranch) {
+      throw new Error("This Slack thread is already on the base branch.");
+    }
 
     if (!this.options.getRepositoryStatus) {
       throw new Error("Merge status is not configured.");
@@ -379,6 +422,9 @@ export class RouterService {
     const thread = this.requireThread(slackChannelId, slackThreadTs);
     if (thread.state !== "idle") {
       throw new Error("This Slack thread is not ready to confirm a merge.");
+    }
+    if (thread.branchName === thread.baseBranch) {
+      throw new Error("This Slack thread is already on the base branch.");
     }
     if (
       expectedSelection &&
@@ -430,6 +476,7 @@ export class RouterService {
       worktreePath: mergedRepoPath,
       branchName: thread.baseBranch,
       activeTurnId: null,
+      appServerSessionStale: true,
       state: "idle",
     });
 
@@ -475,6 +522,12 @@ export class RouterService {
     }
   }
 
+  private requireLiveSession(thread: ThreadRecord): void {
+    if (thread.appServerSessionStale) {
+      throw new Error("This Slack thread needs a new message to refresh the Codex session.");
+    }
+  }
+
   private isAuthorizedUser(userId: string): boolean {
     return userId === this.options.allowedUserId;
   }
@@ -491,6 +544,7 @@ function buildThreadRecord(
     slackThreadTs,
     appServerThreadId,
     activeTurnId: null,
+    appServerSessionStale: false,
     state: "running",
     ...worktree,
   };

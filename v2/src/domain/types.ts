@@ -24,6 +24,7 @@ export type ThreadRecord = {
   slackThreadTs: string;
   appServerThreadId: string;
   activeTurnId?: string | null;
+  appServerSessionStale?: boolean | null;
   state: ThreadState;
 } & ThreadWorktree;
 

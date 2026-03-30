@@ -205,6 +205,63 @@ describe("RouterService", () => {
     expect(replies).toEqual(["Continuing Codex task for project `template`."]);
   });
 
+  it("starts a fresh App Server thread when a recovered thread is marked with a stale session", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_fresh" });
+    const turnStart = vi.fn().mockResolvedValue({ turnId: "turn_fresh" });
+    const replies: string[] = [];
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_stale",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "interrupted",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+    });
+
+    await service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0002",
+      threadTs: "1710000000.0001",
+      text: "Resume after restart",
+      userId: "U123",
+      reply: (message) => {
+        replies.push(message);
+      },
+    });
+
+    expect(threadStart).toHaveBeenCalledWith({
+      cwd: fixture.projectDir,
+    });
+    expect(turnStart).toHaveBeenCalledWith({
+      cwd: fixture.projectDir,
+      prompt: "Resume after restart",
+      threadId: "thread_fresh",
+    });
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      appServerThreadId: "thread_fresh",
+      activeTurnId: "turn_fresh",
+      appServerSessionStale: false,
+      state: "running",
+    });
+    expect(replies).toEqual(["Continuing Codex task for project `template`."]);
+  });
+
   it("marks an existing thread as running before a resumed turn resolves", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
@@ -456,6 +513,7 @@ describe("RouterService", () => {
       slackThreadTs: "1710000000.0001",
       appServerThreadId: "thread_existing",
       activeTurnId: "turn_old",
+      appServerSessionStale: false,
       state: "awaiting_user_input",
       worktreePath: fixture.projectDir,
       branchName: "main",
@@ -565,6 +623,7 @@ describe("RouterService", () => {
       slackThreadTs: "1710000000.0001",
       appServerThreadId: "thread_existing",
       activeTurnId: "turn_old",
+      appServerSessionStale: false,
       state: "idle",
       worktreePath: fixture.projectDir,
       branchName: "main",
@@ -798,9 +857,43 @@ describe("RouterService", () => {
         sourceBranch: "codex/slack/1710000000-0001",
         targetBranch: "main",
       }),
-    ).rejects.toThrow("Merge confirmation is stale. Request a fresh merge preview.");
+    ).rejects.toThrow("This Slack thread is already on the base branch.");
 
     expect(executeMergeToMain).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects merge preview when the thread is already on the base branch", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const getRepositoryStatus = vi.fn();
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart: vi.fn(),
+      getRepositoryStatus,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "idle",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    await expect(
+      service.previewMergeToMain("U123", "C08TEMPLATE", "1710000000.0001"),
+    ).rejects.toThrow("This Slack thread is already on the base branch.");
+
+    expect(getRepositoryStatus).not.toHaveBeenCalled();
   });
 
   it("rejects merge confirmation when the worktree is dirty", async () => {

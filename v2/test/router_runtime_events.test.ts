@@ -90,6 +90,7 @@ describe("startRouterRuntime event bridge", () => {
       routerService: {},
       registerSlackMessageHandler: harness.registerSlackMessageHandler,
     });
+    harness.upsertThread.mockClear();
 
     const listener = harness.notifications[0];
     expect(listener).toBeTypeOf("function");

@@ -114,6 +114,11 @@ export async function startRouterRuntime(input: {
     recoverableThreads: input.store.listRecoverableThreads(),
   });
 
+  for (const recoveredThread of recovery.recoveredThreads) {
+    input.store.upsertThread(recoveredThread);
+  }
+  refreshThreadMap();
+
   if (recovery.notifyChannelId && recovery.notifyThreadTs) {
     await input.slackApp.client.chat.postMessage({
       channel: recovery.notifyChannelId,

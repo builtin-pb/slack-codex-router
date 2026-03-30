@@ -42,7 +42,10 @@ export class WorktreeManager {
           cwd: input.repoPath,
         });
       } catch (error) {
-        if (!this.pathExists(worktreePath)) {
+        if (
+          !this.pathExists(worktreePath) ||
+          !looksLikeConcurrentWorktreeCreationError(error)
+        ) {
           throw error;
         }
       }
@@ -61,4 +64,9 @@ export function buildBranchName(threadTs: string): string {
 
 export function buildWorktreePath(repoPath: string, threadTs: string): string {
   return join(repoPath, ".codex-worktrees", threadTs.replace(/\./g, "-"));
+}
+
+function looksLikeConcurrentWorktreeCreationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /already exists|already checked out|branch .* already exists/i.test(message);
 }

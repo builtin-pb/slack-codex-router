@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS threads (
   slack_thread_ts TEXT NOT NULL,
   app_server_thread_id TEXT NOT NULL,
   active_turn_id TEXT,
+  app_server_session_stale INTEGER NOT NULL DEFAULT 0,
   state TEXT NOT NULL CHECK (state IN (${threadStateCheck})),
   worktree_path TEXT NOT NULL,
   branch_name TEXT NOT NULL,

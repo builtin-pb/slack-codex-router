@@ -28,11 +28,20 @@ export async function recoverAfterRestart(input: {
   recoverableThreads: ThreadRecord[];
 }): Promise<{
   recoveredThreadCount: number;
+  recoveredThreads: ThreadRecord[];
   notifyThreadTs: string | null;
   notifyChannelId: string | null;
 }> {
+  const recoveredThreads: ThreadRecord[] = input.recoverableThreads.map((thread) => ({
+    ...thread,
+    activeTurnId: null,
+    appServerSessionStale: true,
+    state: thread.state === "idle" ? "idle" : "interrupted",
+  }));
+
   return {
-    recoveredThreadCount: input.recoverableThreads.length,
+    recoveredThreadCount: recoveredThreads.length,
+    recoveredThreads,
     notifyThreadTs: input.pendingRestartIntent?.slackThreadTs ?? null,
     notifyChannelId: input.pendingRestartIntent?.slackChannelId ?? null,
   };

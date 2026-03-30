@@ -30,5 +30,29 @@ describe("recoverAfterRestart without a pending restart intent", () => {
     expect(result.recoveredThreadCount).toBe(2);
     expect(result.notifyChannelId).toBeNull();
     expect(result.notifyThreadTs).toBeNull();
+    expect(result.recoveredThreads).toEqual([
+      {
+        slackChannelId: "C123",
+        slackThreadTs: "1710000000.0001",
+        appServerThreadId: "thread_abc",
+        activeTurnId: null,
+        appServerSessionStale: true,
+        state: "interrupted",
+        worktreePath: "/tmp/wt",
+        branchName: "codex/slack/1710000000-0001",
+        baseBranch: "main",
+      },
+      {
+        slackChannelId: "C456",
+        slackThreadTs: "1710000000.0002",
+        appServerThreadId: "thread_def",
+        activeTurnId: null,
+        appServerSessionStale: true,
+        state: "interrupted",
+        worktreePath: "/tmp/wt-2",
+        branchName: "codex/slack/1710000000-0002",
+        baseBranch: "main",
+      },
+    ]);
   });
 });

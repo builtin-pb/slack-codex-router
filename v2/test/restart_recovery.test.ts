@@ -50,5 +50,18 @@ describe("recoverAfterRestart", () => {
     expect(result.recoveredThreadCount).toBe(1);
     expect(result.notifyThreadTs).toBe("1710000000.0001");
     expect(result.notifyChannelId).toBe("C123");
+    expect(result.recoveredThreads).toEqual([
+      {
+        slackChannelId: "C123",
+        slackThreadTs: "1710000000.0001",
+        appServerThreadId: "thread_abc",
+        activeTurnId: null,
+        appServerSessionStale: true,
+        state: "interrupted",
+        worktreePath: "/tmp/wt",
+        branchName: "codex/slack/1710000000-0001",
+        baseBranch: "main",
+      },
+    ]);
   });
 });

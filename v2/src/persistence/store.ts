@@ -20,10 +20,14 @@ type TableInfoRow = {
   name: string;
 };
 
+type PersistedThreadRow = Omit<ThreadRecord, "appServerSessionStale"> & {
+  appServerSessionStale?: number | null;
+};
+
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3") as new (databasePath: string) => DatabaseHandle;
 
-type ThreadRow = ThreadRecord;
+type ThreadRow = PersistedThreadRow;
 type RestartIntentRow = RestartIntent;
 
 export class RouterStore {
@@ -37,6 +41,7 @@ export class RouterStore {
     this.db = new Database(databasePath);
     this.db.exec(bootstrapSql);
     this.ensureThreadsActiveTurnIdColumn();
+    this.ensureThreadsSessionStaleColumn();
   }
 
   upsertThread(record: ThreadRecord): void {
@@ -48,16 +53,18 @@ export class RouterStore {
           slack_thread_ts,
           app_server_thread_id,
           active_turn_id,
+          app_server_session_stale,
           state,
           worktree_path,
           branch_name,
           base_branch
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slack_channel_id, slack_thread_ts) DO UPDATE SET
           slack_channel_id = excluded.slack_channel_id,
           slack_thread_ts = excluded.slack_thread_ts,
           app_server_thread_id = excluded.app_server_thread_id,
           active_turn_id = excluded.active_turn_id,
+          app_server_session_stale = excluded.app_server_session_stale,
           state = excluded.state,
           worktree_path = excluded.worktree_path,
           branch_name = excluded.branch_name,
@@ -69,6 +76,7 @@ export class RouterStore {
         record.slackThreadTs,
         record.appServerThreadId,
         record.activeTurnId ?? null,
+        record.appServerSessionStale ? 1 : 0,
         record.state,
         record.worktreePath,
         record.branchName,
@@ -88,6 +96,7 @@ export class RouterStore {
           slack_thread_ts AS slackThreadTs,
           app_server_thread_id AS appServerThreadId,
           active_turn_id AS activeTurnId,
+          app_server_session_stale AS appServerSessionStale,
           state,
           worktree_path AS worktreePath,
           branch_name AS branchName,
@@ -110,6 +119,7 @@ export class RouterStore {
           slack_thread_ts AS slackThreadTs,
           app_server_thread_id AS appServerThreadId,
           active_turn_id AS activeTurnId,
+          app_server_session_stale AS appServerSessionStale,
           state,
           worktree_path AS worktreePath,
           branch_name AS branchName,
@@ -178,11 +188,26 @@ export class RouterStore {
 
     this.db.exec("ALTER TABLE threads ADD COLUMN active_turn_id TEXT;");
   }
+
+  private ensureThreadsSessionStaleColumn(): void {
+    const columns = this.db
+      .prepare("PRAGMA table_info(threads)")
+      .all() as TableInfoRow[];
+
+    if (columns.some((column) => column.name === "app_server_session_stale")) {
+      return;
+    }
+
+    this.db.exec(
+      "ALTER TABLE threads ADD COLUMN app_server_session_stale INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
 }
 
-function normalizeThreadRow(row: ThreadRow): ThreadRow {
+function normalizeThreadRow(row: ThreadRow): ThreadRecord {
   return {
     ...row,
     activeTurnId: row.activeTurnId ?? null,
+    appServerSessionStale: Boolean(row.appServerSessionStale),
   };
 }
