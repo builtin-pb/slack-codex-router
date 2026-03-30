@@ -396,11 +396,11 @@ Run: `npm --prefix v2 test -- test/config.test.ts`
 Expected: `2 passed`
 
 - [x] **Step 5: Commit**
-Observed: Created commit `b79d174` with the requested message `fix: align v2 bootstrap with root env`, updating the v2 bootstrap to load the repo-root `.env` by default, honor the `SCR_*` aliases, and parse quoted app-server commands safely.
+Observed: Created the initial bootstrap commit `88218c3` with the requested message `feat: bootstrap slack codex router v2 workspace`, including the new workspace files and the Task 1 plan-log update. Later Task 1 quality fixes landed in follow-up commits `b79d174` (root `.env` reuse, `SCR_*` aliases, and quoted command parsing) and `af4fa1f` (final plan-log alignment).
 
 ```bash
-git add docs/agent/plans/2026-03-30-slack-codex-v2.md v2/.env.example v2/src/bin/router.ts v2/src/config.ts v2/test/config.test.ts
-git commit -m "fix: align v2 bootstrap with root env"
+git add docs/agent/plans/2026-03-30-slack-codex-v2.md v2/package.json v2/tsconfig.json v2/.env.example v2/.gitignore v2/package-lock.json v2/src/config.ts v2/src/bin/router.ts v2/test/config.test.ts
+git commit -m "feat: bootstrap slack codex router v2 workspace"
 ```
 
 ### Task 2: Add the `v2` persistence schema and recovery primitives
