@@ -567,12 +567,12 @@ export function buildLauncher(deps: {
   spawnWorker(): Promise<WorkerHandle>;
 }) {
   return {
-    async runOnce(): Promise<void> {
+    async runOnce(): Promise<number> {
       while (true) {
         const worker = await deps.spawnWorker();
         const exitCode = await worker.wait();
         if (exitCode !== RESTART_EXIT_CODE) {
-          return;
+          return exitCode;
         }
       }
     },
@@ -586,13 +586,13 @@ export function buildLauncher(deps: {
 ```
 
 - [x] **Step 4: Run the launcher test**
-Observed: `npm --prefix v2 test -- test/launcher.test.ts` passed with `1 passed`; additional required verification also succeeded with `npm --prefix v2 run build` after correcting the invalid bare `npm --prefix v2 build` invocation.
+Observed: `npm --prefix v2 test -- test/launcher.test.ts` passed with `3 passed` after adding coverage for non-restart exit-code propagation and signal forwarding; additional required verification also succeeded with `npm --prefix v2 run build`.
 
 Run: `npm --prefix v2 test -- test/launcher.test.ts`  
-Expected: `1 passed`
+Expected: `3 passed`
 
 - [x] **Step 5: Commit**
-Observed: Created the requested implementation commit as `0fa41b1` with message `feat: add router v2 launcher`; the Task 3 plan log is recorded afterward in place rather than via amend.
+Observed: Created the initial Task 3 implementation commit as `0fa41b1` with message `feat: add router v2 launcher`; later hardening for exit-code propagation, signal forwarding, and plan-log corrections landed in follow-up commits, so this step should be read as the first Task 3 checkpoint rather than the entire Task 3 history.
 
 ```bash
 git add v2/src/bin/launcher.ts v2/src/runtime/launcher.ts v2/src/runtime/restart.ts v2/test/launcher.test.ts
