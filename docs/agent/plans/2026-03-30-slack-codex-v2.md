@@ -399,8 +399,8 @@ Expected: `2 passed`
 Observed: Created commit `b79d174` with the requested message `fix: align v2 bootstrap with root env`, updating the v2 bootstrap to load the repo-root `.env` by default, honor the `SCR_*` aliases, and parse quoted app-server commands safely.
 
 ```bash
-git add v2/package.json v2/tsconfig.json v2/.env.example v2/src/config.ts v2/src/bin/router.ts v2/test/config.test.ts
-git commit -m "feat: bootstrap slack codex router v2 workspace"
+git add docs/agent/plans/2026-03-30-slack-codex-v2.md v2/.env.example v2/src/bin/router.ts v2/src/config.ts v2/test/config.test.ts
+git commit -m "fix: align v2 bootstrap with root env"
 ```
 
 ### Task 2: Add the `v2` persistence schema and recovery primitives
