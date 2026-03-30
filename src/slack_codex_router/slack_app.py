@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import mimetypes
+import shutil
 import threading
 from collections.abc import Callable, Mapping
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -23,11 +27,15 @@ class SlackRouter:
         registry: ProjectRegistry,
         manager: JobManager,
         store: RouterStore,
+        bot_token: str | None = None,
+        log_dir: Path | None = None,
     ) -> None:
         self._allowed_user_id = allowed_user_id
         self._registry = registry
         self._manager = manager
         self._store = store
+        self._bot_token = bot_token
+        self._log_dir = log_dir
         self._commands = RouterCommands(store=store, manager=manager)
 
     def handle_message(self, event: Mapping[str, object], reply: ReplyFn) -> None:
@@ -41,13 +49,9 @@ class SlackRouter:
             reply("This channel is not registered to a project.")
             return
 
-        prompt = str(event.get("text") or "").strip()
-        if not prompt:
-            reply("Send a non-empty message to start or continue a task.")
-            return
-
         message_ts = str(event["ts"])
         thread_ts = str(event.get("thread_ts") or message_ts)
+        prompt = str(event.get("text") or "").strip()
         if prompt == "status":
             self._reply_command_result(reply, lambda: self._commands.status(thread_ts))
             return
@@ -60,6 +64,19 @@ class SlackRouter:
         if prompt == "show diff":
             self._reply_command_result(reply, lambda: self._commands.show_diff(project.path))
             return
+
+        try:
+            image_paths = tuple(self._download_image_files(event))
+        except Exception as exc:
+            reply(f"Could not read attached image: {exc}")
+            return
+
+        if not prompt:
+            if image_paths:
+                prompt = "Inspect the attached image(s)."
+            else:
+                reply("Send a non-empty message to start or continue a task.")
+                return
 
         if event.get("thread_ts"):
             session = self._store.get_thread_session(thread_ts)
@@ -85,6 +102,7 @@ class SlackRouter:
                     prompt=prompt,
                     project=project,
                     session_id=prepared.session_id,
+                    image_paths=image_paths,
                 )
             except Exception as exc:
                 reply(f"Could not continue Codex session: {exc}")
@@ -104,6 +122,7 @@ class SlackRouter:
                 user_message_ts=message_ts,
                 prompt=prompt,
                 project=project,
+                image_paths=image_paths,
             )
         except Exception as exc:
             reply(f"Could not start Codex task: {exc}")
@@ -181,6 +200,45 @@ class SlackRouter:
 
         reply(header)
 
+    def _download_image_files(self, event: Mapping[str, object]) -> list[Path]:
+        files = event.get("files")
+        if not isinstance(files, list):
+            return []
+
+        if self._bot_token is None or self._log_dir is None:
+            raise RuntimeError("router is not configured to download Slack image attachments")
+
+        message_ts = str(event["ts"]).replace(".", "-")
+        destination_dir = self._log_dir / "slack-inputs" / message_ts
+        destination_dir.mkdir(parents=True, exist_ok=True)
+
+        downloaded: list[Path] = []
+        for file_info in files:
+            if not isinstance(file_info, Mapping):
+                continue
+
+            mimetype = str(file_info.get("mimetype") or "")
+            if not mimetype.startswith("image/"):
+                continue
+
+            url = str(file_info.get("url_private_download") or file_info.get("url_private") or "")
+            if not url:
+                continue
+
+            file_id = str(file_info.get("id") or f"image-{len(downloaded) + 1}")
+            filename = str(file_info.get("name") or "")
+            suffix = Path(filename).suffix or mimetypes.guess_extension(mimetype) or ".img"
+            destination = destination_dir / f"{file_id}{suffix}"
+            self._download_file(url, destination)
+            downloaded.append(destination)
+
+        return downloaded
+
+    def _download_file(self, url: str, destination: Path) -> None:
+        request = Request(url, headers={"Authorization": f"Bearer {self._bot_token}"})
+        with urlopen(request) as response, destination.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+
     def start_completion_watch(
         self,
         *,
@@ -209,7 +267,8 @@ def build_app(*, bot_token: str, app_token: str, router: SlackRouter) -> SocketM
 
     @app.event("message")
     def on_message(event, say) -> None:
-        if event.get("subtype") or not event.get("user"):
+        subtype = event.get("subtype")
+        if subtype not in (None, "file_share") or not event.get("user"):
             return
 
         thread_ts = str(event.get("thread_ts") or event["ts"])

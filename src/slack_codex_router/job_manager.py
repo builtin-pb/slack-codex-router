@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from slack_codex_router.registry import ProjectConfig
 from slack_codex_router.store import RouterStore
@@ -104,6 +105,7 @@ class JobManager:
         user_message_ts: str,
         prompt: str,
         project: ProjectConfig,
+        image_paths: tuple[Path, ...] | list[Path] = (),
     ) -> ActiveRun:
         if len(self._active_by_thread) >= self._global_limit:
             raise RuntimeError("Global concurrency limit reached")
@@ -112,7 +114,7 @@ class JobManager:
         if len(active_threads) >= project.max_concurrent_jobs:
             raise RuntimeError("Project concurrency limit reached")
 
-        run = self._runner.start(project.path, prompt)
+        run = self._runner.start(project.path, prompt, image_paths=image_paths)
         try:
             self._store.upsert_thread_session(
                 thread_ts=thread_ts,
@@ -145,6 +147,7 @@ class JobManager:
         user_message_ts: str,
         prompt: str,
         project: ProjectConfig,
+        image_paths: tuple[Path, ...] | list[Path] = (),
     ) -> bool:
         prepared = self.prepare_follow_up(
             thread_ts=thread_ts,
@@ -157,6 +160,7 @@ class JobManager:
             prompt=prompt,
             project=project,
             session_id=prepared.session_id,
+            image_paths=image_paths,
         )
         return prepared.interrupted_prior_run
 
@@ -218,10 +222,11 @@ class JobManager:
         prompt: str,
         project: ProjectConfig,
         session_id: str,
+        image_paths: tuple[Path, ...] | list[Path] = (),
     ) -> None:
         run = None
         try:
-            run = self._runner.resume(project.path, session_id, prompt)
+            run = self._runner.resume(project.path, session_id, prompt, image_paths=image_paths)
             self._store.upsert_thread_session(
                 thread_ts=thread_ts,
                 channel_id=channel_id,

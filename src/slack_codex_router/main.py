@@ -39,6 +39,8 @@ def main() -> int:
         registry=registry,
         manager=manager,
         store=store,
+        bot_token=config.slack_bot_token,
+        log_dir=config.log_dir,
     )
     handler = build_app(
         bot_token=config.slack_bot_token,

@@ -27,7 +27,14 @@ class RecordingRunner:
         self.interruptions = 0
         self.runs: list[ControlledRun] = []
 
-    def start(self, project_path: Path, prompt: str):
+    def start(
+        self,
+        project_path: Path,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ):
+        del image_paths
         self.calls.append(("start", prompt))
         run = ControlledRun(
             thread_id="session-1",
@@ -38,7 +45,15 @@ class RecordingRunner:
         self.runs.append(run)
         return run
 
-    def resume(self, project_path: Path, session_id: str, prompt: str):
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ):
+        del image_paths
         self.calls.append(("resume", prompt))
         run = ControlledRun(
             thread_id=session_id,

@@ -36,6 +36,52 @@ def test_build_resume_command_places_session_id_before_prompt(tmp_path: Path) ->
     ]
 
 
+def test_build_exec_command_includes_images_before_prompt(tmp_path: Path) -> None:
+    output_file = tmp_path / "last.txt"
+    first_image = tmp_path / "first.png"
+    second_image = tmp_path / "second.jpg"
+    command = build_exec_command(
+        "Reply with READY.",
+        output_file,
+        image_paths=(first_image, second_image),
+    )
+    assert command == [
+        "codex",
+        "exec",
+        "--json",
+        "--output-last-message",
+        str(output_file),
+        "-i",
+        str(first_image),
+        "-i",
+        str(second_image),
+        "Reply with READY.",
+    ]
+
+
+def test_build_resume_command_includes_images_before_session_id(tmp_path: Path) -> None:
+    output_file = tmp_path / "last.txt"
+    image = tmp_path / "image.png"
+    command = build_resume_command(
+        "019d38b3-48fe-7790-a2e3-d9a5f81b450a",
+        "status",
+        output_file,
+        image_paths=(image,),
+    )
+    assert command == [
+        "codex",
+        "exec",
+        "resume",
+        "--json",
+        "--output-last-message",
+        str(output_file),
+        "-i",
+        str(image),
+        "019d38b3-48fe-7790-a2e3-d9a5f81b450a",
+        "status",
+    ]
+
+
 class FakeLaunchProcess:
     def __init__(self, pid: int) -> None:
         self.pid = pid

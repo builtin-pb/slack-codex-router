@@ -6,5 +6,3 @@ __pycache__/
 state/
 logs/
 config/projects.yaml
-.codex-last-*.txt
-.codex-run-*.log

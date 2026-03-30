@@ -25,7 +25,14 @@ class FakeRunner:
         self.resume_calls: list[tuple[Path, str, str]] = []
         self.current = FakeRun(thread_id="session-1", pid=1001)
 
-    def start(self, project_path: Path, prompt: str) -> FakeRun:
+    def start(
+        self,
+        project_path: Path,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> FakeRun:
+        del image_paths
         self.exec_calls.append((project_path, prompt))
         self.current = FakeRun(
             thread_id="session-1",
@@ -35,7 +42,15 @@ class FakeRunner:
         )
         return self.current
 
-    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> FakeRun:
+        del image_paths
         self.resume_calls.append((project_path, session_id, prompt))
         self.current = FakeRun(
             thread_id=session_id,
@@ -69,7 +84,14 @@ class BlockingRunner(FakeRunner):
 
 
 class FailingResumeRunner(FakeRunner):
-    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> FakeRun:
         self.resume_calls.append((project_path, session_id, prompt))
         raise RuntimeError("resume failed")
 
@@ -85,9 +107,16 @@ class StopBeforeResumeRunner(FakeRunner):
         self.stop_calls.append((run, timeout_seconds))
         return True
 
-    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> FakeRun:
         self.resume_seen_stopped = self.current.interrupted
-        return super().resume(project_path, session_id, prompt)
+        return super().resume(project_path, session_id, prompt, image_paths=image_paths)
 
 
 class StoppingRunner(FakeRunner):
@@ -164,7 +193,15 @@ class BlockingStopSuccessFailingResumeRunner(FakeRunner):
         self.release_stop.wait(timeout=1)
         return True
 
-    def resume(self, project_path: Path, session_id: str, prompt: str) -> FakeRun:
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> FakeRun:
+        del image_paths
         self.resume_calls.append((project_path, session_id, prompt))
         raise RuntimeError("resume failed")
 

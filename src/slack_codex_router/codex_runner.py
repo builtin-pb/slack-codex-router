@@ -21,28 +21,49 @@ class CodexRun:
     log_path: Path
 
 
-def build_exec_command(prompt: str, output_file: Path) -> list[str]:
-    return [
+def _build_image_args(image_paths: tuple[Path, ...] | list[Path]) -> list[str]:
+    args: list[str] = []
+    for image_path in image_paths:
+        args.extend(["-i", str(image_path)])
+    return args
+
+
+def build_exec_command(
+    prompt: str,
+    output_file: Path,
+    *,
+    image_paths: tuple[Path, ...] | list[Path] = (),
+) -> list[str]:
+    command = [
         "codex",
         "exec",
         "--json",
         "--output-last-message",
         str(output_file),
-        prompt,
     ]
+    command.extend(_build_image_args(image_paths))
+    command.append(prompt)
+    return command
 
 
-def build_resume_command(session_id: str, prompt: str, output_file: Path) -> list[str]:
-    return [
+def build_resume_command(
+    session_id: str,
+    prompt: str,
+    output_file: Path,
+    *,
+    image_paths: tuple[Path, ...] | list[Path] = (),
+) -> list[str]:
+    command = [
         "codex",
         "exec",
         "resume",
         "--json",
         "--output-last-message",
         str(output_file),
-        session_id,
-        prompt,
     ]
+    command.extend(_build_image_args(image_paths))
+    command.extend([session_id, prompt])
+    return command
 
 
 class CodexRunner:
@@ -59,15 +80,33 @@ class CodexRunner:
         self._log_file_name = log_file_name
         self._thread_id_timeout_seconds = thread_id_timeout_seconds
 
-    def start(self, project_path: Path, prompt: str) -> CodexRun:
-        output_file, log_path = self._allocate_run_paths(project_path)
-        return self._launch(project_path, build_exec_command(prompt, output_file), output_file, log_path)
-
-    def resume(self, project_path: Path, session_id: str, prompt: str) -> CodexRun:
+    def start(
+        self,
+        project_path: Path,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> CodexRun:
         output_file, log_path = self._allocate_run_paths(project_path)
         return self._launch(
             project_path,
-            build_resume_command(session_id, prompt, output_file),
+            build_exec_command(prompt, output_file, image_paths=image_paths),
+            output_file,
+            log_path,
+        )
+
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ) -> CodexRun:
+        output_file, log_path = self._allocate_run_paths(project_path)
+        return self._launch(
+            project_path,
+            build_resume_command(session_id, prompt, output_file, image_paths=image_paths),
             output_file,
             log_path,
             default_thread_id=session_id,

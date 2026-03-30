@@ -16,7 +16,18 @@ StaleWatcherError = getattr(job_manager_module, "StaleWatcherError", RuntimeErro
 
 
 class FakeRunner:
-    def start(self, project_path: Path, prompt: str):
+    def __init__(self) -> None:
+        self.start_calls: list[tuple[Path, str, tuple[Path, ...]]] = []
+        self.resume_calls: list[tuple[Path, str, str, tuple[Path, ...]]] = []
+
+    def start(
+        self,
+        project_path: Path,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ):
+        self.start_calls.append((project_path, prompt, tuple(image_paths)))
         output_file = project_path / ".codex-last.txt"
         output_file.write_text("Final summary from Codex", encoding="utf-8")
         return type(
@@ -31,7 +42,15 @@ class FakeRunner:
             },
         )()
 
-    def resume(self, project_path: Path, session_id: str, prompt: str):
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ):
+        self.resume_calls.append((project_path, session_id, prompt, tuple(image_paths)))
         output_file = project_path / ".codex-last.txt"
         output_file.write_text("Updated final summary from Codex", encoding="utf-8")
         return type(
@@ -55,6 +74,7 @@ class FakeRunner:
 
 class BlockingResumeRunner(FakeRunner):
     def __init__(self) -> None:
+        super().__init__()
         self.resume_started = threading.Event()
         self.release_resume = threading.Event()
 
@@ -62,10 +82,17 @@ class BlockingResumeRunner(FakeRunner):
         del run, timeout_seconds
         return True
 
-    def resume(self, project_path: Path, session_id: str, prompt: str):
+    def resume(
+        self,
+        project_path: Path,
+        session_id: str,
+        prompt: str,
+        *,
+        image_paths: tuple[Path, ...] | list[Path] = (),
+    ):
         self.resume_started.set()
         self.release_resume.wait(timeout=1)
-        return super().resume(project_path, session_id, prompt)
+        return super().resume(project_path, session_id, prompt, image_paths=image_paths)
 
 
 class FailingManager:
@@ -705,3 +732,111 @@ def test_build_app_ignores_subtypes_and_events_without_user(monkeypatch: pytest.
         }
     ]
     assert replies == [{"text": "routed", "thread_ts": "1710000002.100000"}]
+
+
+def test_build_app_routes_file_share_messages(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_apps: dict[str, BoltApp] = {}
+
+    def app_factory(*, token: str) -> BoltApp:
+        app = BoltApp(
+            token=token,
+            token_verification_enabled=False,
+            request_verification_enabled=False,
+        )
+        created_apps["app"] = app
+        return app
+
+    monkeypatch.setattr(slack_app_module, "App", app_factory)
+
+    class RecordingRouter:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+
+        def handle_message(self, event, reply) -> None:
+            self.events.append(dict(event))
+            reply("routed")
+
+    router = RecordingRouter()
+    build_app(bot_token="x", app_token="y", router=router)
+    listener = created_apps["app"]._listeners[0]
+    replies: list[dict[str, str]] = []
+
+    listener.ack_function(
+        {
+            "subtype": "file_share",
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000003.100000",
+            "text": "look at this image",
+            "files": [{"id": "F1", "mimetype": "image/png"}],
+        },
+        lambda **kwargs: replies.append(kwargs),
+    )
+
+    assert router.events == [
+        {
+            "subtype": "file_share",
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000003.100000",
+            "text": "look at this image",
+            "files": [{"id": "F1", "mimetype": "image/png"}],
+        }
+    ]
+    assert replies == [{"text": "routed", "thread_ts": "1710000003.100000"}]
+
+
+def test_image_only_message_uses_default_prompt_and_downloaded_images(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    runner = FakeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=registry,
+        manager=manager,
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    replies: list[str] = []
+    watch_calls: list[tuple[str, str, str]] = []
+    downloaded_image = tmp_path / "router-logs" / "slack-inputs" / "image.png"
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
+    )
+    router._download_image_files = lambda event: [downloaded_image]  # type: ignore[method-assign]
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "subtype": "file_share",
+            "text": "",
+            "files": [
+                {
+                    "id": "F1",
+                    "mimetype": "image/png",
+                    "url_private_download": "https://files.slack.com/files-pri/T/F/image.png",
+                }
+            ],
+        },
+        replies.append,
+    )
+
+    assert runner.start_calls == [
+        (tmp_path, "Inspect the attached image(s).", (downloaded_image,))
+    ]
+    assert watch_calls == [("C123", "1710000000.100000", "1710000000.100000")]
+    assert replies == ["Started Codex task for project `demo`."]
