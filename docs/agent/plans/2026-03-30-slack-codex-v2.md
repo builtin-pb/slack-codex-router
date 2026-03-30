@@ -773,7 +773,8 @@ git commit -m "feat: add slack thread routing for v2"
 - Create: `v2/src/slack/blocks.ts`
 - Create: `v2/test/slack_blocks.test.ts`
 
-- [ ] **Step 1: Write the failing Block Kit test**
+- [x] **Step 1: Write the failing Block Kit test**
+Observed: Added `v2/test/slack_blocks.test.ts` first with one question-card test and one conditional control-strip test so Task 6 covers both Codex-originated choice rendering and Slack-native thread controls.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -799,12 +800,14 @@ describe("slack blocks", () => {
 });
 ```
 
-- [ ] **Step 2: Run the Block Kit test**
+- [x] **Step 2: Run the Block Kit test**
+Observed: `npm --prefix v2 test -- test/slack_blocks.test.ts` failed in the expected red state with `Cannot find module '../src/slack/blocks.js'` because the new Block Kit builders did not exist yet.
 
 Run: `npm --prefix v2 test -- v2/test/slack_blocks.test.ts`  
 Expected: fail because the Block Kit builders do not exist.
 
-- [ ] **Step 3: Implement control builders**
+- [x] **Step 3: Implement control builders**
+Observed: Added `v2/src/slack/blocks.ts` with minimal plain-object Block Kit builders: `buildUserInputBlocks()` renders a prompt section plus `codex_choice:*` buttons, and `buildThreadControls()` renders a single actions block with always-on status/what-changed/open-diff/restart/archive controls plus conditional interrupt/review/merge buttons.
 
 ```ts
 export function buildThreadControls(state: {
@@ -840,12 +843,14 @@ export function buildUserInputBlocks(input: {
 }
 ```
 
-- [ ] **Step 4: Run the Block Kit test**
+- [x] **Step 4: Run the Block Kit test**
+Observed: The first green attempt exposed only a control-order mismatch, so the builder order was adjusted without changing scope; `npm --prefix v2 test -- test/slack_blocks.test.ts` then passed (`2 passed`) and `npm --prefix v2 run build` succeeded.
 
 Run: `npm --prefix v2 test -- v2/test/slack_blocks.test.ts`  
 Expected: `1 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Created the Task 6 implementation commit `577d17c` with message `feat: add slack block kit controls for v2`.
 
 ```bash
 git add v2/src/slack/blocks.ts v2/test/slack_blocks.test.ts
