@@ -1,0 +1,129 @@
+<h2>Thread and Event State Model</h2>
+<p class="subtitle">Design the core around App Server threads and event subscriptions so richer progress can be added by rendering more event types, not by changing control flow.</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Primary Mapping</div>
+    <div class="mockup-body">
+      <div class="split">
+        <div class="mockup">
+          <div class="mockup-header">Slack Identity</div>
+          <div class="mockup-body">
+            <div class="placeholder">channel_id</div>
+            <div class="placeholder">thread_ts</div>
+            <div class="placeholder">slack_message_ts records</div>
+          </div>
+        </div>
+        <div class="mockup">
+          <div class="mockup-header">Codex Identity</div>
+          <div class="mockup-body">
+            <div class="placeholder">app_server_thread_id</div>
+            <div class="placeholder">active_turn_id</div>
+            <div class="placeholder">latest_subscription state</div>
+          </div>
+        </div>
+      </div>
+      <div class="mock-content" style="margin-top:14px">
+        <strong>Invariant:</strong> one Slack thread maps to one Codex App Server thread. Codex owns turns inside that thread.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Minimal Runtime States</h3>
+  <div class="cards">
+    <div class="card" data-choice="idle" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Idle</h3>
+        <p>Thread exists, no active turn running, waiting for a new user message or a control action.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="running" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Running</h3>
+        <p>Codex is executing a turn and events are streaming to Slack.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="awaiting-user-input" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Awaiting user input</h3>
+        <p>Codex explicitly asked a question or presented options; Slack is waiting for a reply or Block Kit action.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="interrupted" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Interrupted</h3>
+        <p>The active turn was stopped; the thread remains valid and can continue with a new turn.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Turn Handling Rules</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="start-turn" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Use <code>turn/start</code> by default</h3>
+        <p>Most Slack replies should become normal new turns in the existing Codex thread.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="steer-short-corrections" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Use <code>turn/steer</code> for short corrective replies</h3>
+        <p>If Codex is actively running and the user sends a brief refinement like “only touch docs”, steer instead of interrupt+restart.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="interrupt-explicit" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Interrupt on explicit control</h3>
+        <p>The Interrupt button always maps to <code>turn/interrupt</code>; the router does not silently cancel a turn just because a new reply arrived.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Persistence Model</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Persist now</h4>
+      <ul>
+        <li>Slack thread -> Codex thread mapping</li>
+        <li>Current runtime state</li>
+        <li>Latest active turn id</li>
+        <li>Outstanding interactive prompt metadata</li>
+        <li>Rendered Slack message ids for update/dedupe</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Do not persist as source of truth</h4>
+      <ul>
+        <li>Full Codex conversation transcript</li>
+        <li>Router-authored summaries of App Server state</li>
+        <li>Synthetic workflow stages</li>
+        <li>Duplicated skill inventories</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recovery Strategy</h3>
+  <div class="mockup">
+    <div class="mockup-header">After process restart</div>
+    <div class="mockup-body">
+      <div class="mock-content">
+        1. Reload persisted Slack-thread mappings.<br>
+        2. Reconnect to Codex App Server.<br>
+        3. Re-read thread runtime state from App Server.<br>
+        4. Rebuild subscriptions for active threads.<br>
+        5. Resume rendering without inventing missing progress text.
+      </div>
+    </div>
+  </div>
+</div>

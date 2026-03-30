@@ -1,0 +1,128 @@
+<h2>Slack Interaction Model</h2>
+<p class="subtitle">Goal: preserve normal Codex behavior while rendering it in Slack threads with interactive controls when Codex explicitly asks for them.</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Thread Lifecycle in Slack</div>
+    <div class="mockup-body">
+      <div class="mockup" style="margin-bottom:12px">
+        <div class="mockup-header">1. User starts a task</div>
+        <div class="mockup-body">
+          <div class="mock-content">
+            <strong>User:</strong> "Investigate the failing CI on main"<br><br>
+            <strong>Bot:</strong> starts a Codex thread and subscribes to App Server events.
+          </div>
+        </div>
+      </div>
+      <div class="mockup" style="margin-bottom:12px">
+        <div class="mockup-header">2. Codex streams normal progress</div>
+        <div class="mockup-body">
+          <div class="mock-content">
+            <strong>Bot:</strong> posts Codex-originated planning/progress text into the same Slack thread.<br><br>
+            No router-authored preflight or workflow wrapper is inserted.
+          </div>
+        </div>
+      </div>
+      <div class="mockup" style="margin-bottom:12px">
+        <div class="mockup-header">3. Codex asks a question or gives options</div>
+        <div class="mockup-body">
+          <div class="mock-content">
+            <strong>Bot:</strong> renders the question plus Block Kit buttons/selects when the prompt is structured enough.<br><br>
+            <strong>User:</strong> can tap a choice or reply in free text.
+          </div>
+        </div>
+      </div>
+      <div class="mockup">
+        <div class="mockup-header">4. User refines or interrupts</div>
+        <div class="mockup-body">
+          <div class="mock-content">
+            <strong>User:</strong> replies in-thread.<br><br>
+            Router decides between <code>turn/start</code> and <code>turn/steer</code> based on whether Codex is actively running and whether the reply is a short corrective update.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Rendered Slack Message Types</h3>
+  <div class="cards">
+    <div class="card" data-choice="progress-message" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Progress message</h3>
+        <p>Plain in-thread text from Codex events. This is the default surface and stays close to CLI behavior.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="question-card" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Question card</h3>
+        <p>Used when Codex asks for a short answer or explicit choice. Includes buttons or a select menu when the choices are clear.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="control-strip" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Control strip</h3>
+        <p>Persistent thread actions like Interrupt, Review, Status, and Show Diff. These are Slack-native controls, not pseudo-prompts sent to Codex.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Control Philosophy</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="free-text-primary" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Free text remains primary</h3>
+        <p>The user can always just reply in-thread like normal Codex CLI conversation.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="interactive-when-clear" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Interactive controls only when clear</h3>
+        <p>Use Block Kit for explicit options, approvals, and thread controls, not for every Codex utterance.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="no-router-rewording" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>No router rewording</h3>
+        <p>The router should avoid paraphrasing Codex content except where Slack UI needs a control label or fallback text.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Example Slack Layout</h3>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">Normal progress</div>
+      <div class="mockup-body">
+        <div class="mock-content">
+          <strong>Codex</strong><br>
+          I’m checking the failing workflow, reading the repo CI config, and comparing the most recent breakage against the prior passing run.
+        </div>
+        <div class="mock-content" style="margin-top:10px">
+          <strong>Controls</strong><br>
+          [Interrupt] [Status] [Review] [What changed]
+        </div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">Codex asks for a choice</div>
+      <div class="mockup-body">
+        <div class="mock-content">
+          <strong>Codex</strong><br>
+          I found two likely fixes. Which direction do you want?
+        </div>
+        <div class="mock-content" style="margin-top:10px">
+          [Fix flaky test] [Update CI image] [Explain both first]
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,110 @@
+<h2>Persistence, Recovery, and Rollout</h2>
+<p class="subtitle">Final design section: make <code>v2</code> reliable enough for daily use, not just richer than the current router.</p>
+
+<div class="section">
+  <h3>What the Router Persists</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Persist</h4>
+      <ul>
+        <li>Slack channel + thread ids</li>
+        <li>App Server thread id</li>
+        <li>Active turn id and runtime state</li>
+        <li>Worktree path, branch, and base branch</li>
+        <li>Outstanding interactive prompt metadata</li>
+        <li>Slack message ids used for updates and controls</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Do not duplicate</h4>
+      <ul>
+        <li>Full Codex transcript</li>
+        <li>Skill definitions</li>
+        <li>Synthetic summaries of Codex state</li>
+        <li>Independent router workflow stages</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recovery Model</h3>
+  <div class="mockup">
+    <div class="mockup-header">After router restart</div>
+    <div class="mockup-body">
+      <div class="mock-content">
+        1. Load persisted Slack-thread records.<br>
+        2. Restart or reconnect to Codex App Server.<br>
+        3. Re-read each live App Server thread.<br>
+        4. Re-subscribe to active threads and turns.<br>
+        5. Rehydrate Slack controls without replaying fake history.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Failure Handling</h3>
+  <div class="cards">
+    <div class="card" data-choice="slack-failure" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Slack delivery failure</h3>
+        <p>Do not lose Codex state. Retry Slack rendering separately from the App Server thread lifecycle.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="app-server-failure" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>App Server disconnect</h3>
+        <p>Mark affected threads degraded, reconnect, and recover from App Server state instead of assuming the turn is gone.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="worktree-failure" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Worktree setup failure</h3>
+        <p>Fail before Codex starts coding. The thread should show a setup error and expose a Retry setup control.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Release Strategy</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="fresh-v2" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Breaking <code>v2</code> is clean</h3>
+        <p>No backward-compatibility burden for old thread/session state. Start from a new persistence schema.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="shadow-verify" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Verify with real Slack, not just mocked tests</h3>
+        <p>Before replacing the old router, validate the full flow against a real private channel and your existing bot tokens.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="env-reuse-final" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Reuse current <code>.env</code></h3>
+        <p>The existing Slack bot/app stays in place; configuration evolves, but bot setup should not need to be recreated.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Implementation Phases</h3>
+  <div class="mockup">
+    <div class="mockup-header">Phase order</div>
+    <div class="mockup-body">
+      <div class="mock-content">
+        <strong>Phase 1:</strong> App Server client, Slack thread mapping, basic turn streaming<br>
+        <strong>Phase 2:</strong> interactive prompts, control strip, explicit interrupt/review<br>
+        <strong>Phase 3:</strong> worktree manager and merge-to-main flow<br>
+        <strong>Phase 4:</strong> restart recovery, failure hardening, richer event rendering
+      </div>
+    </div>
+  </div>
+</div>

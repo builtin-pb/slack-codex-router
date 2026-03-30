@@ -1,0 +1,119 @@
+<h2>Worktree Isolation and Merge Flow</h2>
+<p class="subtitle">New requirement: multiple Codex threads can run at the same time without clashing, and merging back to <code>main</code> should be a simple Slack action.</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Default Isolation Rule</div>
+    <div class="mockup-body">
+      <div class="mock-content">
+        <strong>Recommendation:</strong> every top-level Slack thread gets its own dedicated Git worktree.<br><br>
+        The worktree is created from a selected base branch, usually <code>main</code>. Codex App Server runs that thread with <code>cwd</code> pointed at the worktree path, not the shared repo root.
+      </div>
+      <div class="split" style="margin-top:14px">
+        <div class="mockup">
+          <div class="mockup-header">Slack thread A</div>
+          <div class="mockup-body">
+            <div class="placeholder">project/.codex-worktrees/thread-a/</div>
+            <div class="placeholder">branch: auto or detached HEAD</div>
+          </div>
+        </div>
+        <div class="mockup">
+          <div class="mockup-header">Slack thread B</div>
+          <div class="mockup-body">
+            <div class="placeholder">project/.codex-worktrees/thread-b/</div>
+            <div class="placeholder">branch: auto or detached HEAD</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recommended Branch Policy</h3>
+  <div class="cards">
+    <div class="card" data-choice="auto-branch-default" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Default to named auto-branches</h3>
+        <p>Example: <code>codex/slack/&lt;thread-key&gt;</code>. Easier to merge, inspect, and recover than detached HEAD.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="detached-ok" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Detached HEAD still allowed</h3>
+        <p>Support it as an advanced or fallback mode, but not the default for Slack if one-tap merge matters.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="one-worktree-per-thread" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>One worktree per thread</h3>
+        <p>The isolation unit is the Slack task thread, not the whole project or the whole user session.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Slack Controls for Completion</h3>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">During work</div>
+      <div class="mockup-body">
+        <div class="mock-content">
+          [Interrupt] [Status] [Review] [What changed]
+        </div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">After work is ready</div>
+      <div class="mockup-body">
+        <div class="mock-content">
+          [Open diff] [Merge to main] [Create branch here] [Archive task]
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Merge Button Behavior</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="merge-button-safe" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3><code>Merge to main</code> is a guided action</h3>
+        <p>It should show a compact confirmation with branch/worktree info and whether checks passed, not perform a silent merge.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="merge-button-no-typing" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>No long instructions required</h3>
+        <p>The user should not need to type “please merge this back to main”; the button should carry the action context.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="merge-policy-layer" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Router owns merge policy</h3>
+        <p>App Server does the coding work; the Slack control plane handles worktree creation, merge orchestration, and cleanup.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Recommended Merge Sequence</h3>
+  <div class="mockup">
+    <div class="mockup-header">One-tap merge, guarded</div>
+    <div class="mockup-body">
+      <div class="mock-content">
+        1. User taps <strong>Merge to main</strong>.<br>
+        2. Router checks the worktree status and optional required validations.<br>
+        3. Slack shows a short confirmation card.<br>
+        4. Router merges the worktree branch into local <code>main</code>.<br>
+        5. Router posts the result and offers cleanup/archive.
+      </div>
+    </div>
+  </div>
+</div>

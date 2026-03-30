@@ -89,6 +89,13 @@ The design should require the simplest operational model that can actually suppo
 
 For native Slack restart, something outside the router process is mandatory. If the deployment environment does not already provide this, `v2` should ship a tiny launcher process.
 
+The supervisor or launcher should be deliberately function-agnostic:
+
+- it should only start, stop, restart, and health-check the router service
+- it should not know Slack thread semantics, App Server protocol details, worktree state, or merge logic
+- it should remain stable enough that editing the main router from Slack does not usually require editing the supervisor itself
+- if a custom launcher is needed, it should be small enough to audit quickly and boring enough to avoid frequent change
+
 ### Restart Philosophy
 
 `v2` should treat restart as a brief control-plane interruption followed by deterministic recovery:

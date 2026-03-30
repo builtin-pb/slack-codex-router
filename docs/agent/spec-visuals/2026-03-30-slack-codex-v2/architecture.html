@@ -1,0 +1,116 @@
+<h2>Slack Codex Router v2: Runtime Architecture</h2>
+<p class="subtitle">Recommended direction: a Node-first Slack service built around Codex App Server, with your existing Slack bot credentials reused from the current <code>.env</code>.</p>
+
+<div class="section">
+  <div class="mockup">
+    <div class="mockup-header">Primary Data Flow</div>
+    <div class="mockup-body">
+      <div class="split">
+        <div class="mockup">
+          <div class="mockup-header">Slack Surface</div>
+          <div class="mockup-body">
+            <div class="mock-nav">Slack Channel -> Slack Thread -> Block Kit Actions</div>
+            <div class="placeholder">Top-level prompt starts a task</div>
+            <div class="placeholder">Replies become follow-up turns</div>
+            <div class="placeholder">Buttons answer Codex-originated questions and approvals</div>
+          </div>
+        </div>
+        <div class="mockup">
+          <div class="mockup-header">Router v2 Service</div>
+          <div class="mockup-body">
+            <div class="placeholder">Slack event adapter</div>
+            <div class="placeholder">App Server client + event subscription</div>
+            <div class="placeholder">Slack renderer for Codex events</div>
+            <div class="placeholder">Thread state + message dedupe + recovery</div>
+          </div>
+        </div>
+      </div>
+      <div class="mockup" style="margin-top:16px">
+        <div class="mockup-header">Execution Layer</div>
+        <div class="mockup-body">
+          <div class="mock-content">
+            <strong>Codex App Server</strong><br>
+            Owns threads, turns, steer/interrupt, review mode, skills, collaboration modes, and user-input requests.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Boundaries</h3>
+  <div class="cards">
+    <div class="card" data-choice="thin-slack-layer" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Slack stays thin</h3>
+        <p>Slack does not invent its own workflow stages. It renders normal Codex behavior and relays user controls back into App Server.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="app-server-authority" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>App Server is authoritative</h3>
+        <p>Planning, questioning, review mode, steering, and approvals come from Codex/App Server, not a router-authored preflight layer.</p>
+      </div>
+    </div>
+    <div class="card" data-choice="env-reuse" onclick="toggleSelect(this)">
+      <div class="card-body">
+        <h3>Reuse current bot setup</h3>
+        <p>The v2 service reads the same Slack bot tokens and allowed-user values from your existing <code>.env</code> so you do not need a new Slack app.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Event Model</h3>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Core now</h4>
+      <ul>
+        <li>Start thread</li>
+        <li>Start turn</li>
+        <li>Interrupt turn</li>
+        <li>Render Codex questions as Block Kit</li>
+        <li>Persist Slack thread to Codex thread mapping</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Layer later without redesign</h4>
+      <ul>
+        <li>Richer progress timelines</li>
+        <li>Skill visibility panels</li>
+        <li>Review artifacts</li>
+        <li>Thread history browser</li>
+        <li>More event types from App Server</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Mapping Rules</h3>
+  <div class="options" data-multiselect>
+    <div class="option" data-choice="map-thread" onclick="toggleSelect(this)">
+      <div class="letter">A</div>
+      <div class="content">
+        <h3>Slack thread = Codex thread</h3>
+        <p>Each Slack thread owns one App Server thread id.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="map-reply" onclick="toggleSelect(this)">
+      <div class="letter">B</div>
+      <div class="content">
+        <h3>Slack reply = new turn or steer</h3>
+        <p>Normal replies create turns; quick corrective replies during execution can steer the active turn.</p>
+      </div>
+    </div>
+    <div class="option" data-choice="map-buttons" onclick="toggleSelect(this)">
+      <div class="letter">C</div>
+      <div class="content">
+        <h3>Buttons = structured answers</h3>
+        <p>When App Server asks for input, Slack sends back the chosen answer instead of free-form router commands.</p>
+      </div>
+    </div>
+  </div>
+</div>
