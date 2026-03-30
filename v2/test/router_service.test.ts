@@ -857,7 +857,7 @@ describe("RouterService", () => {
         sourceBranch: "codex/slack/1710000000-0001",
         targetBranch: "main",
       }),
-    ).rejects.toThrow("This Slack thread is already on the base branch.");
+    ).rejects.toThrow("Merge confirmation is stale. Request a fresh merge preview.");
 
     expect(executeMergeToMain).toHaveBeenCalledTimes(1);
   });

@@ -86,6 +86,8 @@ function createFakeAppServerClient() {
 
 export async function createRuntimeHarness(options: {
   seedThread?: boolean;
+  seedIdleThread?: boolean;
+  seedAwaitingUserInputThread?: boolean;
 } = {}) {
   const project = createTempProjectFixture();
   const slack = createFakeSlackApp();
@@ -98,6 +100,17 @@ export async function createRuntimeHarness(options: {
     store,
     threadStart: async () => ({ threadId: "thread_abc" }),
     turnStart: async () => ({ turnId: "turn_abc" }),
+    reviewStart: async () => ({ turnId: "turn_review" }),
+    getRepositoryStatus: async ({ repoPath, sourceBranch, targetBranch }) => ({
+      repositoryName: "template",
+      sourceBranch,
+      targetBranch,
+      worktreeStatus: "clean",
+      checksStatus: "not run",
+    }),
+    executeMergeToMain: async ({ sourceBranch, targetBranch }) => ({
+      text: `Merged ${sourceBranch} into ${targetBranch}.`,
+    }),
   });
 
   await startRouterRuntime({
@@ -117,6 +130,14 @@ export async function createRuntimeHarness(options: {
 
   if (options.seedThread) {
     store.upsertThread(buildSeedThreadRecord(project.projectDir));
+  }
+
+  if (options.seedIdleThread) {
+    store.upsertThread(buildIdleMergeReadyThreadRecord(project.projectDir));
+  }
+
+  if (options.seedAwaitingUserInputThread) {
+    store.upsertThread(buildAwaitingUserInputThreadRecord(project.projectDir));
   }
 
   const actionResponses: Array<Record<string, unknown>> = [];
@@ -149,7 +170,12 @@ export async function createRuntimeHarness(options: {
     },
     actionResponses,
     async dispatchAction(actionId: string, body: Record<string, unknown>): Promise<void> {
+      const action =
+        typeof body.action === "object" && body.action !== null
+          ? (body.action as { action_id?: string; value?: string })
+          : undefined;
       await slack.dispatchAction(actionId, body, {
+        action,
         respond: async (message) => {
           actionResponses.push(message);
           return undefined;
@@ -177,6 +203,34 @@ function buildSeedThreadRecord(projectDir: string): ThreadRecord {
     state: "idle",
     worktreePath: projectDir,
     branchName: "main",
+    baseBranch: "main",
+  };
+}
+
+function buildIdleMergeReadyThreadRecord(projectDir: string): ThreadRecord {
+  return {
+    slackChannelId: "C08TEMPLATE",
+    slackThreadTs: "1710000000.0001",
+    appServerThreadId: "thread_abc",
+    activeTurnId: null,
+    appServerSessionStale: false,
+    state: "idle",
+    worktreePath: projectDir,
+    branchName: "codex/slack/1710000000-0001",
+    baseBranch: "main",
+  };
+}
+
+function buildAwaitingUserInputThreadRecord(projectDir: string): ThreadRecord {
+  return {
+    slackChannelId: "C08TEMPLATE",
+    slackThreadTs: "1710000000.0001",
+    appServerThreadId: "thread_abc",
+    activeTurnId: "turn_abc",
+    appServerSessionStale: false,
+    state: "awaiting_user_input",
+    worktreePath: projectDir,
+    branchName: "codex/slack/1710000000-0001",
     baseBranch: "main",
   };
 }

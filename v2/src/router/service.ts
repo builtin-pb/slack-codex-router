@@ -423,15 +423,15 @@ export class RouterService {
     if (thread.state !== "idle") {
       throw new Error("This Slack thread is not ready to confirm a merge.");
     }
-    if (thread.branchName === thread.baseBranch) {
-      throw new Error("This Slack thread is already on the base branch.");
-    }
     if (
       expectedSelection &&
       (expectedSelection.sourceBranch !== thread.branchName ||
         expectedSelection.targetBranch !== thread.baseBranch)
     ) {
       throw new Error("Merge confirmation is stale. Request a fresh merge preview.");
+    }
+    if (thread.branchName === thread.baseBranch) {
+      throw new Error("This Slack thread is already on the base branch.");
     }
     if (!this.options.getRepositoryStatus) {
       throw new Error("Merge status is not configured.");
