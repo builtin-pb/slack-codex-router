@@ -454,7 +454,7 @@ Run: `npm --prefix v2 test -- v2/test/store.test.ts`
 Expected: fail because `RouterStore` and schema tables do not exist yet.
 
 - [x] **Step 3: Implement the schema and store**
-Observed: Added `v2/src/domain/types.ts`, `v2/src/persistence/schema.ts`, and `v2/src/persistence/store.ts` with SQLite-backed `threads`, `slack_messages`, `interactive_prompts`, and `restart_intents` tables plus `RouterStore` methods for upsert, lookup, recovery listing, and restart-intent lifecycle.
+Observed: Added `v2/src/domain/types.ts`, `v2/src/persistence/schema.ts`, and `v2/src/persistence/store.ts` with SQLite-backed `threads`, `slack_messages`, `interactive_prompts`, and `restart_intents` tables keyed by `(slack_channel_id, slack_thread_ts)` plus `RouterStore` methods for composite lookup, recovery listing, restart-intent lifecycle, and explicit close support.
 
 ```ts
 export type ThreadRecord = {
@@ -494,10 +494,10 @@ export class RouterStore {
 ```
 
 - [x] **Step 4: Run the store test**
-Observed: `npm --prefix v2 test -- test/store.test.ts` passed (`2 tests`), and `npm --prefix v2 run build` passed after switching the store to a local runtime interface for `better-sqlite3`.
+Observed: `npm --prefix v2 test -- test/store.test.ts` passed (`3 tests`), and `npm --prefix v2 run build` passed after switching the store to a local runtime interface for `better-sqlite3`.
 
 Run: `npm --prefix v2 test -- v2/test/store.test.ts`  
-Expected: `1 passed`
+Expected: `3 passed`
 
 - [x] **Step 5: Commit**
 Observed: Committed the Task 2 implementation as `87b63ca` with message `feat: add v2 persistence schema`.

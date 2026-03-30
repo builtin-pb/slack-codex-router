@@ -11,6 +11,7 @@ type Statement = {
 type DatabaseHandle = {
   exec(sql: string): void;
   prepare(sql: string): Statement;
+  close(): void;
 };
 
 const require = createRequire(import.meta.url);
@@ -32,16 +33,17 @@ export class RouterStore {
       .prepare(
         `
         INSERT INTO threads (
-          slack_thread_ts,
           slack_channel_id,
+          slack_thread_ts,
           app_server_thread_id,
           state,
           worktree_path,
           branch_name,
           base_branch
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(slack_thread_ts) DO UPDATE SET
+        ON CONFLICT(slack_channel_id, slack_thread_ts) DO UPDATE SET
           slack_channel_id = excluded.slack_channel_id,
+          slack_thread_ts = excluded.slack_thread_ts,
           app_server_thread_id = excluded.app_server_thread_id,
           state = excluded.state,
           worktree_path = excluded.worktree_path,
@@ -50,8 +52,8 @@ export class RouterStore {
       `,
       )
       .run(
-        record.slackThreadTs,
         record.slackChannelId,
+        record.slackThreadTs,
         record.appServerThreadId,
         record.state,
         record.worktreePath,
@@ -60,7 +62,10 @@ export class RouterStore {
       );
   }
 
-  getThread(slackThreadTs: string): ThreadRecord | null {
+  getThread(
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): ThreadRecord | null {
     const row = this.db
       .prepare(
         `
@@ -73,10 +78,10 @@ export class RouterStore {
           branch_name AS branchName,
           base_branch AS baseBranch
         FROM threads
-        WHERE slack_thread_ts = ?
+        WHERE slack_channel_id = ? AND slack_thread_ts = ?
       `,
       )
-      .get(slackThreadTs) as ThreadRow | undefined;
+      .get(slackChannelId, slackThreadTs) as ThreadRow | undefined;
 
     return row ?? null;
   }
@@ -95,7 +100,7 @@ export class RouterStore {
           base_branch AS baseBranch
         FROM threads
         WHERE state != 'failed_setup'
-        ORDER BY slack_thread_ts ASC
+        ORDER BY slack_channel_id ASC, slack_thread_ts ASC
       `,
       )
       .all() as ThreadRow[];
@@ -107,15 +112,17 @@ export class RouterStore {
         `
         INSERT INTO restart_intents (
           id,
-          requested_by_thread_ts,
+          slack_channel_id,
+          slack_thread_ts,
           requested_at
-        ) VALUES (1, ?, ?)
+        ) VALUES (1, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
-          requested_by_thread_ts = excluded.requested_by_thread_ts,
+          slack_channel_id = excluded.slack_channel_id,
+          slack_thread_ts = excluded.slack_thread_ts,
           requested_at = excluded.requested_at
       `,
       )
-      .run(intent.requestedByThreadTs, intent.requestedAt);
+      .run(intent.slackChannelId, intent.slackThreadTs, intent.requestedAt);
   }
 
   getPendingRestartIntent(): RestartIntent | null {
@@ -123,7 +130,8 @@ export class RouterStore {
       .prepare(
         `
         SELECT
-          requested_by_thread_ts AS requestedByThreadTs,
+          slack_channel_id AS slackChannelId,
+          slack_thread_ts AS slackThreadTs,
           requested_at AS requestedAt
         FROM restart_intents
         WHERE id = 1
@@ -136,5 +144,9 @@ export class RouterStore {
 
   clearRestartIntent(): void {
     this.db.prepare("DELETE FROM restart_intents WHERE id = 1").run();
+  }
+
+  close(): void {
+    this.db.close();
   }
 }

@@ -8,6 +8,11 @@ export const threadStates = [
 
 export type ThreadState = (typeof threadStates)[number];
 
+export type SlackThreadIdentity = {
+  slackChannelId: string;
+  slackThreadTs: string;
+};
+
 export type ThreadRecord = {
   slackChannelId: string;
   slackThreadTs: string;
@@ -18,7 +23,6 @@ export type ThreadRecord = {
   baseBranch: string;
 };
 
-export type RestartIntent = {
-  requestedByThreadTs: string;
+export type RestartIntent = SlackThreadIdentity & {
   requestedAt: string;
 };
