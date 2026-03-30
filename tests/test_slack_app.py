@@ -840,3 +840,71 @@ def test_image_only_message_uses_default_prompt_and_downloaded_images(tmp_path: 
     ]
     assert watch_calls == [("C123", "1710000000.100000", "1710000000.100000")]
     assert replies == ["Started Codex task for project `demo`."]
+
+
+def test_image_only_follow_up_uses_default_prompt_and_downloaded_images(tmp_path: Path) -> None:
+    store = RouterStore(tmp_path / "router.sqlite3")
+    registry = ProjectRegistry(
+        {
+            "C123": ProjectConfig(
+                channel_id="C123",
+                name="demo",
+                path=tmp_path,
+                max_concurrent_jobs=2,
+            )
+        }
+    )
+    runner = FakeRunner()
+    manager = JobManager(store=store, runner=runner, global_limit=4, run_timeout_seconds=1800)
+    router = SlackRouter(
+        allowed_user_id="U123",
+        registry=registry,
+        manager=manager,
+        store=store,
+        bot_token="xoxb-test",
+        log_dir=tmp_path / "router-logs",
+    )
+    replies: list[str] = []
+    watch_calls: list[tuple[str, str, str]] = []
+    downloaded_image = tmp_path / "router-logs" / "slack-inputs" / "reply.png"
+
+    router.start_completion_watch = lambda *, channel_id, thread_ts, expected_message_ts, reply: watch_calls.append(  # type: ignore[method-assign]
+        (channel_id, thread_ts, expected_message_ts)
+    )
+    router._download_image_files = lambda event: [downloaded_image]  # type: ignore[method-assign]
+
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "ts": "1710000000.100000",
+            "text": "inspect this repo",
+        },
+        replies.append,
+    )
+    router.handle_message(
+        {
+            "user": "U123",
+            "channel": "C123",
+            "thread_ts": "1710000000.100000",
+            "ts": "1710000001.100000",
+            "subtype": "file_share",
+            "text": "",
+            "files": [
+                {
+                    "id": "F2",
+                    "mimetype": "image/png",
+                    "url_private_download": "https://files.slack.com/files-pri/T/F/reply.png",
+                }
+            ],
+        },
+        replies.append,
+    )
+
+    assert runner.resume_calls == [
+        (tmp_path, "session-1", "Inspect the attached image(s).", (downloaded_image,))
+    ]
+    assert watch_calls == [
+        ("C123", "1710000000.100000", "1710000000.100000"),
+        ("C123", "1710000000.100000", "1710000001.100000"),
+    ]

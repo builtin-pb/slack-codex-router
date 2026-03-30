@@ -36,6 +36,7 @@ def test_load_config_reads_required_environment(tmp_path: Path, monkeypatch) -> 
         log_dir=log_dir,
         global_concurrency=4,
         run_timeout_seconds=1800,
+        thread_id_timeout_seconds=15.0,
     )
 
 

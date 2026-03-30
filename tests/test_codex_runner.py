@@ -49,12 +49,12 @@ def test_build_exec_command_includes_images_before_prompt(tmp_path: Path) -> Non
         "codex",
         "exec",
         "--json",
-        "--output-last-message",
-        str(output_file),
         "-i",
         str(first_image),
         "-i",
         str(second_image),
+        "--output-last-message",
+        str(output_file),
         "Reply with READY.",
     ]
 
@@ -73,10 +73,10 @@ def test_build_resume_command_includes_images_before_session_id(tmp_path: Path) 
         "exec",
         "resume",
         "--json",
-        "--output-last-message",
-        str(output_file),
         "-i",
         str(image),
+        "--output-last-message",
+        str(output_file),
         "019d38b3-48fe-7790-a2e3-d9a5f81b450a",
         "status",
     ]

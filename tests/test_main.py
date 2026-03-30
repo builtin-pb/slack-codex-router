@@ -40,6 +40,7 @@ def test_main_creates_log_dir_before_starting_handler(
             log_dir=log_dir,
             global_concurrency=4,
             run_timeout_seconds=1800,
+            thread_id_timeout_seconds=15.0,
         ),
     )
     monkeypatch.setattr(main_module.ProjectRegistry, "from_yaml", lambda path: registry)

@@ -38,10 +38,12 @@ def build_exec_command(
         "codex",
         "exec",
         "--json",
-        "--output-last-message",
-        str(output_file),
     ]
     command.extend(_build_image_args(image_paths))
+    command.extend([
+        "--output-last-message",
+        str(output_file),
+    ])
     command.append(prompt)
     return command
 
@@ -58,10 +60,12 @@ def build_resume_command(
         "exec",
         "resume",
         "--json",
-        "--output-last-message",
-        str(output_file),
     ]
     command.extend(_build_image_args(image_paths))
+    command.extend([
+        "--output-last-message",
+        str(output_file),
+    ])
     command.extend([session_id, prompt])
     return command
 

@@ -15,6 +15,7 @@ class AppConfig:
     log_dir: Path
     global_concurrency: int
     run_timeout_seconds: int
+    thread_id_timeout_seconds: float
 
 
 def load_config() -> AppConfig:
@@ -27,4 +28,5 @@ def load_config() -> AppConfig:
         log_dir=Path(os.environ["SCR_LOG_DIR"]),
         global_concurrency=int(os.environ.get("SCR_GLOBAL_CONCURRENCY", "4")),
         run_timeout_seconds=int(os.environ.get("SCR_RUN_TIMEOUT_SECONDS", "1800")),
+        thread_id_timeout_seconds=float(os.environ.get("SCR_THREAD_ID_TIMEOUT_SECONDS", "15")),
     )

@@ -30,7 +30,7 @@ def main() -> int:
     store = RouterStore(config.state_db)
     manager = JobManager(
         store=store,
-        runner=CodexRunner(),
+        runner=CodexRunner(thread_id_timeout_seconds=config.thread_id_timeout_seconds),
         global_limit=config.global_concurrency,
         run_timeout_seconds=config.run_timeout_seconds,
     )
