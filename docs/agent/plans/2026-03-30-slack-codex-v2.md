@@ -662,7 +662,7 @@ export class AppServerClient {
 ```
 
 - [x] **Step 4: Run the App Server client test**
-Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id and to cover synchronous write failures plus transport teardown (`8 passed` tests). Follow-up transport verification also added `v2/test/app_server_process.test.ts` for fast-exit `waitForExit()` behavior and `stderr` backpressure draining (`3 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` succeeded.
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id, duplicate responses are ignored once settled, and synchronous write failures plus transport teardown are handled (`8 passed` tests). Follow-up transport verification also added `v2/test/app_server_process.test.ts` for fast-exit `waitForExit()` behavior and `stderr` backpressure draining (`3 passed` tests), plus extra stabilization regressions for router bootstrap dotenv loading and absolute-path passthrough; the expanded Task 4 verification reached `24 passed` tests overall and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` succeeded.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
 Expected: `8 passed`
