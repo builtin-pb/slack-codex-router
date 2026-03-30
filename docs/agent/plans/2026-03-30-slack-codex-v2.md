@@ -865,7 +865,8 @@ git commit -m "feat: add slack block kit controls for v2"
 - Create: `v2/test/worktree_manager.test.ts`
 - Create: `v2/test/merge_to_main.test.ts`
 
-- [ ] **Step 1: Write the failing worktree and merge tests**
+- [x] **Step 1: Write the failing worktree and merge tests**
+Observed: Added `v2/test/worktree_manager.test.ts` and `v2/test/merge_to_main.test.ts`, expanding the original plan example to cover deterministic worktree paths under `.codex-worktrees` and the merge-confirmation card contents alongside the named-branch contract.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -892,12 +893,14 @@ describe("buildMergeConfirmation", () => {
 });
 ```
 
-- [ ] **Step 2: Run the worktree tests**
+- [x] **Step 2: Run the worktree tests**
+Observed: `npm --prefix v2 test -- test/worktree_manager.test.ts test/merge_to_main.test.ts` failed in the expected red state before the new modules existed.
 
 Run: `npm --prefix v2 test -- v2/test/worktree_manager.test.ts v2/test/merge_to_main.test.ts`  
 Expected: fail because the worktree manager and merge helpers do not exist.
 
-- [ ] **Step 3: Implement the worktree manager and merge helper**
+- [x] **Step 3: Implement the worktree manager and merge helper**
+Observed: Landed `v2/src/worktree/manager.ts` and `v2/src/git/merge_to_main.ts` in `5cef4a1`, with deterministic branch/path helpers, a minimal injectable `WorktreeManager.ensureThreadWorktree()` wrapper around `git worktree add -b`, and a Slack confirmation-card builder that surfaces repo/check/worktree status before merge.
 
 ```ts
 export function buildBranchName(threadTs: string): string {
@@ -929,12 +932,14 @@ export function buildMergeConfirmation(input: {
 }
 ```
 
-- [ ] **Step 4: Run the worktree tests**
+- [x] **Step 4: Run the worktree tests**
+Observed: The targeted Task 7 suite passed (`4 tests` across `test/worktree_manager.test.ts` and `test/merge_to_main.test.ts`), and the later full `v2` verification also kept those tests green.
 
 Run: `npm --prefix v2 test -- v2/test/worktree_manager.test.ts v2/test/merge_to_main.test.ts`  
 Expected: `2 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Task 7 landed as `5cef4a1` (`feat: add worktree isolation and merge controls`).
 
 ```bash
 git add v2/src/worktree/manager.ts v2/src/git/merge_to_main.ts v2/test/worktree_manager.test.ts v2/test/merge_to_main.test.ts
@@ -948,7 +953,8 @@ git commit -m "feat: add worktree isolation and merge controls"
 - Modify: `README.md`
 - Modify: `scripts/start-router.sh`
 
-- [ ] **Step 1: Write the failing restart recovery test**
+- [x] **Step 1: Write the failing restart recovery test**
+Observed: Task 8 coverage expanded beyond the original single helper test: `v2/test/restart_recovery.test.ts` pinned the recovery helper contract, and `v2/test/router_runtime.test.ts` plus later regressions pinned the runtime wiring and restart/no-intent edge cases.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -980,12 +986,14 @@ describe("recoverAfterRestart", () => {
 });
 ```
 
-- [ ] **Step 2: Run the restart recovery test**
+- [x] **Step 2: Run the restart recovery test**
+Observed: The surfaced red state was the missing runtime seam rather than the helper itself: `test/restart_recovery.test.ts` passed once the helper edit existed locally, while `test/router_runtime.test.ts` failed with `Cannot find module '../src/router/runtime.js'` until the runtime module was added.
 
 Run: `npm --prefix v2 test -- v2/test/restart_recovery.test.ts`  
 Expected: fail because the restart recovery helper does not exist.
 
-- [ ] **Step 3: Implement recovery, update docs, and wire the launcher start path**
+- [x] **Step 3: Implement recovery, update docs, and wire the launcher start path**
+Observed: Task 8 landed as a stack: `9534f6e` (`feat: complete v2 restart recovery and cutover docs`) added `v2/src/router/runtime.ts`, promoted `v2/src/bin/router.ts` into the real runtime entrypoint, added `recoverAfterRestart()` and cutover docs/wrapper changes; `1ecabb5` added runtime regressions; `b1bb1a0` added the no-intent recovery regression; `5d21ffa` added the missing-projects bootstrap regression; and `516908c` fixed the router entrypoint to fail hard when the configured projects file is missing.
 
 ```ts
 export async function recoverAfterRestart(input: {
@@ -1013,6 +1021,7 @@ Document in `README.md`:
 - how to fall back to the legacy Python router until cutover is complete
 
 - [ ] **Step 4: Run the full `v2` test suite and a private-channel smoke test**
+Blocked: Automated verification passed on `main` with `npm --prefix v2 test` (`26 passed` test files / `52 passed` tests) and `npm --prefix v2 run build`, but the manual private-Slack-channel smoke validation described in this step was not run in this session.
 
 Run: `npm --prefix v2 test`  
 Expected: all `v2/test/*.test.ts` pass
@@ -1026,7 +1035,8 @@ Run manually in a private Slack channel:
 6. confirm a second thread can run concurrently in a separate worktree
 7. confirm `Merge to main` shows a confirmation card
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: The committed Task 8 stack is `9534f6e`, `1ecabb5`, `b1bb1a0`, `5d21ffa`, and `516908c`; the remaining unchecked work is only the manual private-channel smoke validation from Step 4.
 
 ```bash
 git add v2/test/restart_recovery.test.ts README.md scripts/start-router.sh
