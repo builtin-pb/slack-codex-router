@@ -1,8 +1,15 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RouterStore } from "../src/persistence/store.js";
+
+const require = createRequire(import.meta.url);
+const Database = require("better-sqlite3") as new (databasePath: string) => {
+  exec(sql: string): void;
+  close(): void;
+};
 
 describe("RouterStore", () => {
   it("persists thread routing, worktree, and restart metadata by composite thread identity", () => {
@@ -157,6 +164,87 @@ describe("RouterStore", () => {
         expect(store.getThread("C123", "1710000000.0001")?.activeTurnId).toBe(
           "turn_abc",
         );
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(databaseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates legacy thread rows that predate active turn and stale-session columns", () => {
+    const databaseDir = mkdtempSync(join(tmpdir(), "router-store-legacy-"));
+    const databasePath = join(databaseDir, "state.sqlite3");
+
+    try {
+      const legacyDb = new Database(databasePath);
+      legacyDb.exec(`
+        CREATE TABLE threads (
+          slack_channel_id TEXT NOT NULL,
+          slack_thread_ts TEXT NOT NULL,
+          app_server_thread_id TEXT NOT NULL,
+          state TEXT NOT NULL,
+          worktree_path TEXT NOT NULL,
+          branch_name TEXT NOT NULL,
+          base_branch TEXT NOT NULL,
+          PRIMARY KEY (slack_channel_id, slack_thread_ts)
+        );
+
+        CREATE TABLE restart_intents (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          slack_channel_id TEXT NOT NULL,
+          slack_thread_ts TEXT NOT NULL,
+          requested_at TEXT NOT NULL
+        );
+
+        INSERT INTO threads (
+          slack_channel_id,
+          slack_thread_ts,
+          app_server_thread_id,
+          state,
+          worktree_path,
+          branch_name,
+          base_branch
+        ) VALUES (
+          'C123',
+          '1710000000.0001',
+          'thread_abc',
+          'idle',
+          '/tmp/router/wt-legacy',
+          'codex/slack/1710000000.0001',
+          'main'
+        );
+      `);
+      legacyDb.close();
+
+      const store = new RouterStore(databasePath);
+
+      try {
+        expect(store.getThread("C123", "1710000000.0001")).toEqual({
+          slackChannelId: "C123",
+          slackThreadTs: "1710000000.0001",
+          appServerThreadId: "thread_abc",
+          activeTurnId: null,
+          appServerSessionStale: false,
+          state: "idle",
+          worktreePath: "/tmp/router/wt-legacy",
+          branchName: "codex/slack/1710000000.0001",
+          baseBranch: "main",
+        });
+
+        expect(store.listRecoverableThreads()).toEqual([
+          {
+            slackChannelId: "C123",
+            slackThreadTs: "1710000000.0001",
+            appServerThreadId: "thread_abc",
+            activeTurnId: null,
+            appServerSessionStale: false,
+            state: "idle",
+            worktreePath: "/tmp/router/wt-legacy",
+            branchName: "codex/slack/1710000000.0001",
+            baseBranch: "main",
+          },
+        ]);
       } finally {
         store.close();
       }
