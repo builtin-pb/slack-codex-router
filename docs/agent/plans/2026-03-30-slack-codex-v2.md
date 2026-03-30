@@ -608,7 +608,7 @@ git commit -m "feat: add router v2 launcher"
 - Create: `v2/test/app_server_client.test.ts`
 
 - [x] **Step 1: Write the failing App Server client test**
-Observed: Added `v2/test/app_server_client.test.ts` first, covering the narrow client API only: `initialize`, `threadStart`, `turnStart`, `turnSteer`, `turnInterrupt`, request-id correlation, notification emission, and server error propagation.
+Observed: Added `v2/test/app_server_client.test.ts` first, covering the narrow client API only: `initialize`, `threadStart`, `turnStart`, `turnSteer`, `turnInterrupt`, request-id correlation including out-of-order response handling by id, notification emission, and server error propagation.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -658,7 +658,7 @@ export class AppServerClient {
 ```
 
 - [x] **Step 4: Run the App Server client test**
-Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed (`1 passed`, `2 passed` tests after extending the contract), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` then succeeded after tightening the `events.ts` type guards for strict TypeScript compilation.
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id (`1 passed`, `3 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` then succeeded after tightening the `events.ts` type guards for strict TypeScript compilation.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
 Expected: `1 passed`

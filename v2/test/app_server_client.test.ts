@@ -73,4 +73,27 @@ describe("AppServerClient", () => {
     await expect(turnSteer).rejects.toThrow("cannot steer finished turn");
     await expect(turnInterrupt).resolves.toBeUndefined();
   });
+
+  it("matches out-of-order responses to the original request ids", async () => {
+    const sent: string[] = [];
+    let nextId = 1;
+    const client = new AppServerClient({
+      writeLine: (line) => sent.push(line),
+      createRequestId: () => String(nextId++),
+    });
+
+    const first = client.threadStart({ prompt: "first" });
+    const second = client.turnSteer({ turnId: "turn_123", prompt: "second" });
+
+    expect(sent[0]).toContain('"id":"1"');
+    expect(sent[1]).toContain('"id":"2"');
+
+    client.handleLine(
+      '{"id":"2","error":{"code":409,"message":"second request failed"}}',
+    );
+    client.handleLine('{"id":"1","result":{"threadId":"thread_first"}}');
+
+    await expect(second).rejects.toThrow("second request failed");
+    await expect(first).resolves.toEqual({ threadId: "thread_first" });
+  });
 });
