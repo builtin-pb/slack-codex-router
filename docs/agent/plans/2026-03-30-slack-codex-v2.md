@@ -683,7 +683,8 @@ git commit -m "feat: add codex app server client"
 - Create: `v2/src/slack/render.ts`
 - Create: `v2/test/router_service.test.ts`
 
-- [ ] **Step 1: Write the failing router service test**
+- [x] **Step 1: Write the failing router service test**
+Observed: Added `v2/test/router_service.test.ts` first and expanded it beyond the single example from the plan to pin the actual Task 5 contract: top-level Slack message starts a new App Server thread and persists the mapping, replies in an existing Slack thread reuse the stored App Server thread, malformed registry entries fail fast, and unauthorized users are rejected before any App Server or store work. Follow-up parallel test workers added `v2/test/router_service_regressions.test.ts`, `v2/test/slack_app_handler.test.ts`, `v2/test/router_service_message_validation.test.ts`, `v2/test/router_service_retry_persistence.test.ts`, `v2/test/router_service_retry_resume.test.ts`, `v2/test/slack_app_thread_propagation.test.ts`, `v2/test/router_service_registry_validation.test.ts`, and `v2/test/router_service_duplicate_channel_id.test.ts` to cover relative registry paths, missing-session replies, Slack subtype filtering, top-level thread propagation, empty/unknown-message validation, persistence after a failed first turn, retry reuse of the same App Server thread, malformed registry entries, and duplicate `channel_id` validation.
 
 ```ts
 import { describe, expect, it, vi } from "vitest";
@@ -712,12 +713,14 @@ describe("RouterService", () => {
 });
 ```
 
-- [ ] **Step 2: Run the router service test**
+- [x] **Step 2: Run the router service test**
+Observed: `npm --prefix v2 test -- test/router_service.test.ts` failed in the intended red state before the Task 5 files existed, which confirmed the service and Slack adapter were still missing.
 
 Run: `npm --prefix v2 test -- v2/test/router_service.test.ts`  
 Expected: fail because the router service and Slack adapter do not exist.
 
-- [ ] **Step 3: Implement the service and Slack adapter**
+- [x] **Step 3: Implement the service and Slack adapter**
+Observed: Added `v2/src/router/service.ts`, `v2/src/slack/app.ts`, and `v2/src/slack/render.ts` with a Bolt-agnostic `RouterService`, minimal plain-text rendering, and a narrow Slack message registration helper. The service reuses the v1 YAML channel registry shape, resolves project paths relative to the registry file, authorizes by allowed user id, distinguishes top-level messages from replies, creates or resumes an App Server thread, persists the Slack-thread to App-Server-thread mapping in `RouterStore`, and replies with concise status text. A quality review found that the initial implementation persisted the mapping only after the first `turnStart`; the follow-up fix in `efbe721` now persists the mapping immediately after `threadStart`, before the first turn runs, so failed first turns can be retried against the same App Server thread.
 
 ```ts
 export class RouterService {
@@ -750,12 +753,14 @@ app.event("message", async ({ event, say }) => {
 });
 ```
 
-- [ ] **Step 4: Run the router service test**
+- [x] **Step 4: Run the router service test**
+Observed: The expanded Task 5 suite passed after the implementation and follow-up fixes: `npm --prefix v2 test -- test/router_service_retry_persistence.test.ts test/router_service_retry_resume.test.ts test/router_service.test.ts test/router_service_regressions.test.ts test/router_service_message_validation.test.ts test/slack_app_handler.test.ts test/slack_app_thread_propagation.test.ts test/router_service_registry_validation.test.ts test/router_service_duplicate_channel_id.test.ts` completed green, and the full workspace verification later reached `17 passed` test files / `38 passed` tests with `npm --prefix v2 test`. `npm --prefix v2 run build` also succeeded.
 
 Run: `npm --prefix v2 test -- v2/test/router_service.test.ts`  
 Expected: `1 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Task 5 landed as a small stack instead of a single commit so the execution record preserves the parallel review/test flow: `626cbe2` (`feat: add slack thread routing for v2`), `abc288b` (`test: add task 5 regressions`), `d552aab` (`test: add task 5 message validation regressions`), `5630629` (`test: add task 5 retry persistence regression`), `efbe721` (`fix: persist task 5 thread mapping before first turn`), `116c219` (`test: add task 5 retry resume regression`), `aea43c5` (`test: add slack thread propagation regression`), `05db491` (`test: add malformed registry regression`), `15c0ceb` (`fix: fail fast on invalid task 5 registry entries`), and the final duplicate-channel validation follow-up committed from the local consolidation pass.
 
 ```bash
 git add v2/src/router/service.ts v2/src/slack/app.ts v2/src/slack/render.ts v2/test/router_service.test.ts
