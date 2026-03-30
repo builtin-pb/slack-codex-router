@@ -141,7 +141,8 @@ git commit -m "refactor: archive python router as legacy v1"
 - Create: `v2/src/bin/router.ts`
 - Create: `v2/test/config.test.ts`
 
-- [ ] **Step 1: Write the failing config test**
+- [x] **Step 1: Write the failing config test**
+Observed: Added `v2/test/config.test.ts` first, using the current root Slack user-id contract (`SLACK_ALLOWED_USER_ID`) so the loader can stay compatible with the existing env layout while still accepting the stale `ALLOWED_SLACK_USER_ID` alias.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -167,12 +168,14 @@ describe("loadConfig", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to confirm the workspace is missing**
+- [x] **Step 2: Run the test to confirm the workspace is missing**
+Observed: `npm --prefix v2 test -- v2/test/config.test.ts` failed with `npm error enoent Could not read package.json` because `v2/package.json` did not exist yet, which confirmed the red state came from the missing workspace.
 
 Run: `npm --prefix v2 test -- v2/test/config.test.ts`  
 Expected: fail because `v2/package.json` and `src/config.ts` do not exist yet.
 
-- [ ] **Step 3: Create the minimal workspace and config loader**
+- [x] **Step 3: Create the minimal workspace and config loader**
+Observed: Created `v2/package.json`, `v2/tsconfig.json`, `v2/.env.example`, `v2/src/config.ts`, `v2/src/bin/router.ts`, `v2/package-lock.json`, and `v2/.gitignore`; the loader now prefers `SLACK_ALLOWED_USER_ID` and falls back to `ALLOWED_SLACK_USER_ID`, and `npm --prefix v2 install` completed successfully.
 
 ```json
 {
@@ -221,7 +224,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RouterConfig {
 }
 ```
 
-- [ ] **Step 4: Run the config test**
+- [x] **Step 4: Run the config test**
+Observed: `npm --prefix v2 test -- test/config.test.ts` passed (`1 test`), and `npm --prefix v2 run build` also succeeded with `tsc -p tsconfig.json`.
 
 Run: `npm --prefix v2 test -- v2/test/config.test.ts`  
 Expected: `1 passed`

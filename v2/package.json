@@ -1,0 +1,22 @@
+{
+  "name": "slack-codex-router-v2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/bin/router.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.2.0",
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.5.0",
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}
