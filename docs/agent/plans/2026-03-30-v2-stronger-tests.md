@@ -38,12 +38,14 @@
 - Create: `v2/vitest.fast.config.ts`
 - Create: `v2/vitest.real-integration.config.ts`
 
-- [ ] **Step 1: Verify the dedicated real-integration script does not exist yet**
+- [x] **Step 1: Verify the dedicated real-integration script does not exist yet**
+Observed: `npm --prefix v2 run test:real-integration` failed with `Missing script: "test:real-integration"` before the suite split was added.
 
 Run: `npm --prefix v2 run test:real-integration`
 Expected: FAIL with “Missing script: test:real-integration”.
 
-- [ ] **Step 2: Add the suite target using a directory pattern, not a fixed file list**
+- [x] **Step 2: Add the suite target using a directory pattern, not a fixed file list**
+Observed: Added `v2/vitest.fast.config.ts`, `v2/vitest.real-integration.config.ts`, and updated `v2/package.json` so the default test loop excludes `test/real_integration/**` and the slow suite has its own command.
 
 ```json
 {
@@ -80,17 +82,20 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Refresh the lockfile metadata**
+- [x] **Step 3: Refresh the lockfile metadata**
+Observed: `npm --prefix v2 install` passed and left the existing lockfile content unchanged.
 
 Run: `npm --prefix v2 install`
 Expected: PASS
 
-- [ ] **Step 4: Confirm the new script resolves the intended directory**
+- [x] **Step 4: Confirm the new script resolves the intended directory**
+Observed: `npm --prefix v2 run test:real-integration` failed with `No test files found`, confirming the new command resolved `test/real_integration/**/*.test.ts` rather than failing on a missing script.
 
 Run: `npm --prefix v2 run test:real-integration`
 Expected: FAIL because `test/real_integration/*.test.ts` does not exist yet, not because the script is missing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Committed as `d5b8c78` (`test: add real-integration suite target`).
 
 ```bash
 git add v2/package.json v2/package-lock.json
@@ -103,7 +108,8 @@ git commit -m "test: add real-integration suite target"
 - Modify: `v2/test/integration_runtime_flow.test.ts`
 - Modify: `v2/test/integration_slack_controls.test.ts`
 
-- [ ] **Step 1: Add failing request-user-input round-trip coverage**
+- [x] **Step 1: Add failing request-user-input round-trip coverage**
+Observed: Added the request-user-input round-trip integration test in `v2/test/integration_runtime_flow.test.ts`; the new coverage immediately exercised the live `codex_choice:*` action path.
 
 ```ts
 // v2/test/integration_runtime_flow.test.ts
@@ -150,7 +156,8 @@ it("turns requestUserInput notifications into a live choice action that resumes 
 });
 ```
 
-- [ ] **Step 2: Add failing action-context and merge-flow coverage**
+- [x] **Step 2: Add failing action-context and merge-flow coverage**
+Observed: Added top-level `message.ts` fallback coverage, merge preview/confirm flow coverage, stale recovered choice/review coverage, and replayed merge-confirmation coverage in `v2/test/integration_slack_controls.test.ts`.
 
 ```ts
 // v2/test/integration_slack_controls.test.ts
@@ -199,12 +206,14 @@ it("runs merge preview and merge confirm through live Slack actions", async () =
 });
 ```
 
-- [ ] **Step 3: Run the targeted fast integration tests to verify they fail**
+- [x] **Step 3: Run the targeted fast integration tests to verify they fail**
+Observed: `npm --prefix v2 test -- test/integration_runtime_flow.test.ts test/integration_slack_controls.test.ts` failed with four red cases: missing seed variants in the harness, missing explicit action payload forwarding, and stale merge-confirmation behavior that still reported `already on the base branch`.
 
 Run: `npm --prefix v2 test -- test/integration_runtime_flow.test.ts test/integration_slack_controls.test.ts`
 Expected: FAIL because the current harness and assertions do not yet cover these flows.
 
-- [ ] **Step 4: Extend the harness and fast integration tests**
+- [x] **Step 4: Extend the harness and fast integration tests**
+Observed: Extended `v2/test/helpers/runtime_harness.ts` with merge-ready and awaiting-user-input seed states, merge/review stubs, and explicit forwarded Slack action payloads; also tightened `RouterService.confirmMergeToMain()` so replayed confirmations are treated as stale before the generic base-branch check.
 
 ```ts
 // v2/test/helpers/runtime_harness.ts
@@ -307,12 +316,14 @@ it("rejects a replayed merge confirmation after the thread has already reset to 
 });
 ```
 
-- [ ] **Step 5: Run the targeted fast integration tests to verify they pass**
+- [x] **Step 5: Run the targeted fast integration tests to verify they pass**
+Observed: `npm --prefix v2 test -- test/integration_runtime_flow.test.ts test/integration_slack_controls.test.ts` passed with `8/8` tests green.
 
 Run: `npm --prefix v2 test -- test/integration_runtime_flow.test.ts test/integration_slack_controls.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
+Observed: Committed as `42d0fc1` (`test: cover stateful Slack control flows`).
 
 ```bash
 git add v2/test/integration_runtime_flow.test.ts v2/test/integration_slack_controls.test.ts v2/test/helpers/runtime_harness.ts
@@ -325,7 +336,8 @@ git commit -m "test: cover stateful Slack control flows"
 - Create: `v2/test/restart_recovery_matrix.test.ts`
 - Create: `v2/test/router_service_stale_rebind_failure.test.ts`
 
-- [ ] **Step 1: Add failing recovery-matrix coverage**
+- [x] **Step 1: Add failing recovery-matrix coverage**
+Observed: Added `v2/test/restart_recovery_matrix.test.ts` to pin recovery-state transitions and restart-intent overwrite semantics.
 
 ```ts
 // v2/test/restart_recovery_matrix.test.ts
@@ -384,7 +396,8 @@ describe("recoverAfterRestart matrix", () => {
 });
 ```
 
-- [ ] **Step 2: Add failing stale-rebind rollback coverage**
+- [x] **Step 2: Add failing stale-rebind rollback coverage**
+Observed: Added `v2/test/router_service_stale_rebind_failure.test.ts` to pin stale rebind rollback and worktree-allocation failure behavior.
 
 ```ts
 // v2/test/router_service_stale_rebind_failure.test.ts
@@ -440,12 +453,14 @@ describe("RouterService stale rebind rollback", () => {
 });
 ```
 
-- [ ] **Step 3: Run the targeted fast regression tests to verify they fail**
+- [x] **Step 3: Run the targeted fast regression tests to verify they fail**
+Observed: The new regression files produced the expected initial red state before implementation, then exercised the missing behaviors directly.
 
 Run: `npm --prefix v2 test -- test/restart_recovery_matrix.test.ts test/router_service_stale_rebind_failure.test.ts`
 Expected: FAIL because the new files do not exist yet.
 
-- [ ] **Step 4: Implement the regression tests and any tiny fixture support they need**
+- [x] **Step 4: Implement the regression tests and any tiny fixture support they need**
+Observed: Implemented the regression coverage without widening production scope; no additional fixture work beyond the two new test files was required.
 
 ```ts
 // v2/test/restart_recovery_matrix.test.ts
@@ -505,12 +520,14 @@ it("does not persist any thread row when worktree allocation fails before thread
 });
 ```
 
-- [ ] **Step 5: Run the targeted fast regression tests to verify they pass**
+- [x] **Step 5: Run the targeted fast regression tests to verify they pass**
+Observed: `npm --prefix v2 test -- test/restart_recovery_matrix.test.ts test/router_service_stale_rebind_failure.test.ts` passed.
 
 Run: `npm --prefix v2 test -- test/restart_recovery_matrix.test.ts test/router_service_stale_rebind_failure.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
+Observed: Committed as `7e39831` (`test: pin recovery matrix and stale rollback behavior`).
 
 ```bash
 git add v2/test/restart_recovery_matrix.test.ts v2/test/router_service_stale_rebind_failure.test.ts
@@ -524,7 +541,8 @@ git commit -m "test: pin recovery matrix and stale rollback behavior"
 - Create: `v2/test/real_integration/worktree_manager_real_git.test.ts`
 - Create: `v2/test/real_integration/router_real_merge_flow.test.ts`
 
-- [ ] **Step 1: Add failing real-git tests**
+- [x] **Step 1: Add failing real-git tests**
+Observed: Added real git worktree and merge-flow coverage under `v2/test/real_integration/`, initially red because the fixture and test files did not yet exist.
 
 ```ts
 // v2/test/real_integration/worktree_manager_real_git.test.ts
@@ -588,12 +606,14 @@ describe("WorktreeManager real git", () => {
 });
 ```
 
-- [ ] **Step 2: Run the real-git tests to verify they fail**
+- [x] **Step 2: Run the real-git tests to verify they fail**
+Observed: The targeted real-integration command entered the expected red state before the real git fixture existed.
 
 Run: `npm --prefix v2 run test:real-integration -- test/real_integration/worktree_manager_real_git.test.ts`
 Expected: FAIL because the helper and test file do not exist yet.
 
-- [ ] **Step 3: Implement the temp git fixture**
+- [x] **Step 3: Implement the temp git fixture**
+Observed: Added `v2/test/helpers/git_repo_fixture.ts` with real repo initialization, branch divergence, worktree-path helpers, status helpers, and merge helpers.
 
 ```ts
 // v2/test/helpers/git_repo_fixture.ts
@@ -694,7 +714,8 @@ export async function createGitRepoFixture(options: {
 }
 ```
 
-- [ ] **Step 4: Add the remaining negative and operational assertions**
+- [x] **Step 4: Add the remaining negative and operational assertions**
+Observed: Covered missing-base-branch failure, non-empty worktree path failure, removed-worktree-path failure, root dirtiness from `.codex-worktrees/`, successful real merges from repo root, and persisted metadata rollback on merge failure.
 
 ```ts
 // v2/test/real_integration/worktree_manager_real_git.test.ts
@@ -798,12 +819,14 @@ describe("real merge flow", () => {
 });
 ```
 
-- [ ] **Step 5: Run the real-git tests to verify they pass**
+- [x] **Step 5: Run the real-git tests to verify they pass**
+Observed: `npm --prefix v2 run test:real-integration -- test/real_integration/worktree_manager_real_git.test.ts test/real_integration/router_real_merge_flow.test.ts` passed.
 
 Run: `npm --prefix v2 run test:real-integration -- test/real_integration/worktree_manager_real_git.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
+Observed: Committed as `5718ceb` (`test: cover real git worktree and merge behavior`).
 
 ```bash
 git add v2/test/helpers/git_repo_fixture.ts v2/test/real_integration/worktree_manager_real_git.test.ts v2/test/real_integration/router_real_merge_flow.test.ts
@@ -817,7 +840,8 @@ git commit -m "test: cover real git worktree and merge behavior"
 - Create: `v2/test/fixtures/app_server_stub.mjs`
 - Create: `v2/test/real_integration/router_real_app_server_flow.test.ts`
 
-- [ ] **Step 1: Add failing real-transport tests**
+- [x] **Step 1: Add failing real-transport tests**
+Observed: Added real child-process transport coverage for initialize/thread-start/turn-start plus fragmented and coalesced stdout framing under `v2/test/real_integration/router_real_app_server_flow.test.ts`.
 
 ```ts
 // v2/test/real_integration/router_real_app_server_flow.test.ts
@@ -892,12 +916,14 @@ describe("router runtime with a real app-server child", () => {
 });
 ```
 
-- [ ] **Step 2: Run the real-process tests to verify they fail**
+- [x] **Step 2: Run the real-process tests to verify they fail**
+Observed: The new real-process coverage initially failed because the stub fixture and harness did not exist yet.
 
 Run: `npm --prefix v2 run test:real-integration -- test/real_integration/router_real_app_server_flow.test.ts`
 Expected: FAIL because the helper and stub fixture do not exist yet.
 
-- [ ] **Step 3: Implement the child-process stub**
+- [x] **Step 3: Implement the child-process stub**
+Observed: Added `v2/test/fixtures/app_server_stub.mjs` with initialize/thread-start/turn-start responses, request logging, fragmented output, coalesced output, and forced exit during `turn/start`.
 
 ```js
 // v2/test/fixtures/app_server_stub.mjs
@@ -976,7 +1002,8 @@ rl.on("line", (line) => {
 });
 ```
 
-- [ ] **Step 4: Implement the real App Server harness**
+- [x] **Step 4: Implement the real App Server harness**
+Observed: Added `v2/test/helpers/real_app_server_harness.ts` to boot a real child process, wire a real `AppServerClient`, wait on logged requests, and drive real Slack/runtime interactions against a shared `RouterStore`.
 
 ```ts
 // v2/test/helpers/real_app_server_harness.ts
@@ -1094,12 +1121,14 @@ export async function createRealAppServerHarness(options: {
 }
 ```
 
-- [ ] **Step 5: Run the real-process tests to verify they pass**
+- [x] **Step 5: Run the real-process tests to verify they pass**
+Observed: `npm --prefix v2 run test:real-integration -- test/real_integration/router_real_app_server_flow.test.ts` passed once the harness and stub were wired through the dedicated real-integration config.
 
 Run: `npm --prefix v2 run test:real-integration -- test/real_integration/router_real_app_server_flow.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
+Observed: Committed as `2205d5f` (`test: cover real app-server transport flow`).
 
 ```bash
 git add v2/test/helpers/real_app_server_harness.ts v2/test/fixtures/app_server_stub.mjs v2/test/real_integration/router_real_app_server_flow.test.ts
@@ -1114,7 +1143,8 @@ git commit -m "test: cover real app-server transport flow"
 - Create: `v2/test/helpers/launcher_fixture.ts`
 - Modify: `v2/test/helpers/real_app_server_harness.ts`
 
-- [ ] **Step 1: Add failing restart-loop tests**
+- [x] **Step 1: Add failing restart-loop tests**
+Observed: Added cross-boot restart recovery coverage and launcher restart-loop coverage; the initial red state exposed missing restart-exit plumbing in the real harness and a broken launcher-wrapper observation path.
 
 ```ts
 // v2/test/real_integration/router_restart_real_app_server.test.ts
@@ -1289,12 +1319,14 @@ export async function createLauncherFixture() {
 }
 ```
 
-- [ ] **Step 2: Run the restart-loop tests to verify they fail**
+- [x] **Step 2: Run the restart-loop tests to verify they fail**
+Observed: `npm --prefix v2 run test:real-integration -- test/real_integration/router_restart_real_app_server.test.ts test/real_integration/launcher_restart_loop.test.ts` failed on missing `75` restart observation and a hanging launcher-loop assertion.
 
 Run: `npm --prefix v2 run test:real-integration -- test/real_integration/router_restart_real_app_server.test.ts test/real_integration/launcher_restart_loop.test.ts`
 Expected: FAIL because cross-boot helpers do not exist yet.
 
-- [ ] **Step 3: Extend the real App Server harness for multiple generations**
+- [x] **Step 3: Extend the real App Server harness for multiple generations**
+Observed: Extended the harness with generation-aware child bootstrapping, persistent-store reboot support, `bootNextGeneration()`, thread-reply dispatch, fresh fake Slack apps per generation, serialized child shutdown before reboot, and explicit `requestProcessExit()` capture for graceful restart requests.
 
 ```ts
 // v2/test/helpers/real_app_server_harness.ts
@@ -1365,7 +1397,8 @@ export async function createRealAppServerHarness(options: {
 }
 ```
 
-- [ ] **Step 4: Add the real-process failure case**
+- [x] **Step 4: Add the real-process failure case**
+Observed: Added and kept the `exit-during-turn-start` rollback case green while extending the harness for restart recovery.
 
 ```ts
 // v2/test/real_integration/router_restart_real_app_server.test.ts
@@ -1391,12 +1424,14 @@ it("rolls back thread state when the child exits during turn/start", async () =>
 });
 ```
 
-- [ ] **Step 5: Run the full real-integration suite**
+- [x] **Step 5: Run the full real-integration suite**
+Observed: `npm --prefix v2 run test:real-integration` passed with `5/5` files and `11/11` tests green after preserving generation 1 as `thread_abc` for existing transport assertions.
 
 Run: `npm --prefix v2 run test:real-integration`
 Expected: PASS
 
-- [ ] **Step 6: Run the full repo verification**
+- [x] **Step 6: Run the full repo verification**
+Observed: `npm --prefix v2 test`, `npm --prefix v2 run build`, and `npm --prefix v2 run coverage` all passed; coverage intentionally remains fast-suite-only by design because `coverage` now runs through `vitest.fast.config.ts`.
 
 Run: `npm --prefix v2 test`
 Expected: PASS
@@ -1407,7 +1442,8 @@ Expected: PASS
 Run: `npm --prefix v2 run coverage`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
+Observed: Committed as `e82c400` (`test: cover real restart loop and child failure rollback`).
 
 ```bash
 git add v2/test/helpers/real_app_server_harness.ts v2/test/real_integration/router_restart_real_app_server.test.ts v2/test/real_integration/launcher_restart_loop.test.ts
