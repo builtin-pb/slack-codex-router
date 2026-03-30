@@ -41,6 +41,10 @@ export class AppServerClient {
     await this.sendRequest("turn/interrupt", input);
   }
 
+  reviewStart(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.sendRequest("review/start", input);
+  }
+
   failPendingRequests(error: Error): void {
     const pendingRequests = [...this.pendingRequests.values()];
     this.pendingRequests.clear();

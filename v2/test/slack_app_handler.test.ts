@@ -6,6 +6,10 @@ describe("registerSlackMessageHandler", () => {
   it("ignores subtype events", async () => {
     const router = {
       handleSlackMessage: vi.fn(),
+      interruptThread: vi.fn(),
+      submitChoice: vi.fn(),
+      startReview: vi.fn(),
+      getThreadStatus: vi.fn(),
     } as const;
     let listener:
       | ((args: {

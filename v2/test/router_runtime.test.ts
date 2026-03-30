@@ -7,11 +7,13 @@ describe("startRouterRuntime", () => {
     const initialize = vi.fn().mockResolvedValue(undefined);
     const handleLine = vi.fn();
     const failPendingRequests = vi.fn();
+    const subscribe = vi.fn().mockReturnValue(() => {});
     const onLine = vi.fn().mockReturnValue(() => {});
     const waitForExit = vi.fn().mockResolvedValue(0);
     const postMessage = vi.fn().mockResolvedValue(undefined);
     const start = vi.fn().mockResolvedValue(undefined);
     const clearRestartIntent = vi.fn();
+    const upsertThread = vi.fn();
 
     const store = {
       getPendingRestartIntent: vi.fn().mockReturnValue({
@@ -31,6 +33,7 @@ describe("startRouterRuntime", () => {
         },
       ]),
       clearRestartIntent,
+      upsertThread,
     };
 
     await startRouterRuntime({
@@ -52,6 +55,9 @@ describe("startRouterRuntime", () => {
         initialize,
         handleLine,
         failPendingRequests,
+        events: {
+          subscribe,
+        },
         threadStart: vi.fn(),
         turnStart: vi.fn(),
       },
@@ -78,6 +84,7 @@ describe("startRouterRuntime", () => {
 
     expect(initialize).toHaveBeenCalledTimes(1);
     expect(registerSlackMessageHandler).toHaveBeenCalledTimes(1);
+    expect(subscribe).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledWith({
       channel: "C123",

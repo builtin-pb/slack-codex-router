@@ -6,11 +6,13 @@ function makeRuntimeHarness() {
   const initialize = vi.fn().mockResolvedValue(undefined);
   const handleLine = vi.fn();
   const failPendingRequests = vi.fn();
+  const subscribe = vi.fn().mockReturnValue(() => {});
   const onLine = vi.fn().mockReturnValue(() => {});
   const waitForExit = vi.fn().mockResolvedValue(0);
   const postMessage = vi.fn().mockRejectedValue(new Error("slack unavailable"));
   const start = vi.fn().mockResolvedValue(undefined);
   const clearRestartIntent = vi.fn();
+  const upsertThread = vi.fn();
 
   const store = {
     getPendingRestartIntent: vi.fn().mockReturnValue({
@@ -30,12 +32,16 @@ function makeRuntimeHarness() {
       },
     ]),
     clearRestartIntent,
+    upsertThread,
   };
 
   const appServerClient = {
     initialize,
     handleLine,
     failPendingRequests,
+    events: {
+      subscribe,
+    },
     threadStart: vi.fn(),
     turnStart: vi.fn(),
   };
@@ -53,6 +59,7 @@ function makeRuntimeHarness() {
   return {
     registerSlackMessageHandler,
     failPendingRequests,
+    subscribe,
     onLine,
     waitForExit,
     postMessage,

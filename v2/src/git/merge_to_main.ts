@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+
 type PlainText = {
   type: "plain_text";
   text: string;
@@ -30,6 +32,10 @@ type ActionsBlock = {
 };
 
 export type MergeConfirmationBlock = SectionBlock | ContextBlock | ActionsBlock;
+export type MergeRunner = (input: {
+  args: string[];
+  cwd: string;
+}) => Promise<{ stdout: string }>;
 
 export function buildMergeConfirmation(input: {
   repositoryName: string;
@@ -70,4 +76,33 @@ export function buildMergeConfirmation(input: {
       ],
     },
   ];
+}
+
+export async function mergeBranchToTarget(input: {
+  repoPath: string;
+  sourceBranch: string;
+  targetBranch: string;
+  run?: MergeRunner;
+}): Promise<{ text: string }> {
+  const run =
+    input.run ??
+    (async ({ args, cwd }: { args: string[]; cwd: string }) => ({
+      stdout: execFileSync("git", args, {
+        cwd,
+        encoding: "utf8",
+      }),
+    }));
+
+  await run({
+    args: ["checkout", input.targetBranch],
+    cwd: input.repoPath,
+  });
+  await run({
+    args: ["merge", "--no-ff", "--no-edit", input.sourceBranch],
+    cwd: input.repoPath,
+  });
+
+  return {
+    text: `Merged ${input.sourceBranch} into ${input.targetBranch}.`,
+  };
 }

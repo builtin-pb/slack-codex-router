@@ -35,7 +35,6 @@ describe("WorktreeManager", () => {
     });
     expect(run).toHaveBeenCalledWith({
       args: [
-        "git",
         "worktree",
         "add",
         "-b",

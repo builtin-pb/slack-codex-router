@@ -1,10 +1,14 @@
-const notificationMethods = [
+const fixedNotificationMethods = [
   "thread/status/changed",
   "turn/item",
   "tool/requestUserInput",
 ] as const;
 
-type AppServerNotificationMethod = (typeof notificationMethods)[number];
+type FixedAppServerNotificationMethod = (typeof fixedNotificationMethods)[number];
+
+export type AppServerNotificationMethod =
+  | FixedAppServerNotificationMethod
+  | `item/${string}`;
 
 export type AppServerNotification = {
   method: AppServerNotificationMethod;
@@ -121,7 +125,8 @@ function parseResponse(value: Record<string, unknown>): AppServerResponse | null
 function isNotificationMethod(value: unknown): value is AppServerNotificationMethod {
   return (
     typeof value === "string" &&
-    notificationMethods.includes(value as AppServerNotificationMethod)
+    (fixedNotificationMethods.includes(value as FixedAppServerNotificationMethod) ||
+      value.startsWith("item/"))
   );
 }
 

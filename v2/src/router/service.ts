@@ -1,12 +1,15 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import YAML from "yaml";
-import type { ThreadRecord } from "../domain/types.js";
+import type { ThreadRecord, ThreadWorktree } from "../domain/types.js";
+import { buildMergeConfirmation, type MergeConfirmationBlock } from "../git/merge_to_main.js";
+import type { RepositoryStatus } from "../git/repository_status.js";
 import { RouterStore } from "../persistence/store.js";
 import {
   renderContinuedTask,
   renderEmptyMessage,
   renderMissingSession,
+  renderRunningTurn,
   renderStartedTask,
   renderUnauthorizedUser,
   renderUnknownChannel,
@@ -29,11 +32,25 @@ type TurnStartFn = (input: {
   prompt: string;
   threadId: string;
 }) => Promise<Record<string, unknown>>;
+type TurnInterruptFn = (input: {
+  threadId: string;
+  turnId: string;
+}) => Promise<void>;
+type ReviewStartFn = (input: {
+  threadId: string;
+  target: { type: "uncommittedChanges" };
+}) => Promise<Record<string, unknown>>;
+type EnsureThreadWorktreeFn = (input: {
+  repoPath: string;
+  slackThreadTs: string;
+  baseBranch: string;
+}) => Promise<Pick<ThreadWorktree, "worktreePath" | "branchName">>;
 
 type ProjectConfig = {
   channelId: string;
   name: string;
   path: string;
+  baseBranch: string;
 };
 
 type RouterServiceOptions = {
@@ -42,6 +59,23 @@ type RouterServiceOptions = {
   store: RouterStore;
   threadStart: ThreadStartFn;
   turnStart: TurnStartFn;
+  turnInterrupt?: TurnInterruptFn;
+  reviewStart?: ReviewStartFn;
+  ensureThreadWorktree?: EnsureThreadWorktreeFn;
+  requestRestart?: (input: {
+    slackChannelId: string;
+    slackThreadTs: string;
+  }) => Promise<{ exitCode: number }>;
+  getRepositoryStatus?: (input: {
+    repoPath: string;
+    sourceBranch: string;
+    targetBranch: string;
+  }) => Promise<RepositoryStatus>;
+  executeMergeToMain?: (input: {
+    repoPath: string;
+    sourceBranch: string;
+    targetBranch: string;
+  }) => Promise<{ text: string }>;
 };
 
 type ProjectRegistryDocument = {
@@ -49,7 +83,13 @@ type ProjectRegistryDocument = {
     channel_id?: string;
     name?: string;
     path?: string;
+    base_branch?: string;
   }>;
+};
+
+type MergeSelection = {
+  sourceBranch: string;
+  targetBranch: string;
 };
 
 export class RouterService {
@@ -60,7 +100,7 @@ export class RouterService {
   }
 
   async handleSlackMessage(input: SlackMessageInput): Promise<void> {
-    if (input.userId !== this.options.allowedUserId) {
+    if (!this.isAuthorizedUser(input.userId)) {
       await input.reply(renderUnauthorizedUser());
       return;
     }
@@ -79,15 +119,20 @@ export class RouterService {
 
     const existingThread = this.options.store.getThread(input.channelId, input.threadTs);
     if (existingThread) {
-      await this.options.turnStart({
-        cwd: project.path,
+      if (existingThread.state === "running") {
+        await input.reply(renderRunningTurn());
+        return;
+      }
+
+      const turn = await this.options.turnStart({
+        cwd: existingThread.worktreePath,
         prompt,
         threadId: existingThread.appServerThreadId,
       });
       this.options.store.upsertThread({
         ...existingThread,
+        activeTurnId: readTurnId(turn),
         state: "running",
-        worktreePath: project.path,
       });
       await input.reply(renderContinuedTask(project.name));
       return;
@@ -98,20 +143,310 @@ export class RouterService {
       return;
     }
 
-    const startedThread = await this.options.threadStart({
-      cwd: project.path,
-    });
-
-    this.options.store.upsertThread(
-      buildThreadRecord(input.channelId, input.threadTs, startedThread.threadId, project.path),
+    const worktree = await this.resolveThreadWorktree(
+      project.path,
+      input.threadTs,
+      project.baseBranch,
     );
 
-    await this.options.turnStart({
-      cwd: project.path,
-      prompt,
-      threadId: startedThread.threadId,
+    const startedThread = await this.options.threadStart({
+      cwd: worktree.worktreePath,
+    });
+
+    const baseThreadRecord = buildThreadRecord(
+      input.channelId,
+      input.threadTs,
+      startedThread.threadId,
+      worktree,
+    );
+    let turn: Record<string, unknown>;
+
+    try {
+      turn = await this.options.turnStart({
+        cwd: worktree.worktreePath,
+        prompt,
+        threadId: startedThread.threadId,
+      });
+    } catch (error) {
+      this.options.store.upsertThread({
+        ...baseThreadRecord,
+        state: "failed_setup",
+      });
+      throw error;
+    }
+
+    this.options.store.upsertThread({
+      ...baseThreadRecord,
+      activeTurnId: readTurnId(turn),
     });
     await input.reply(renderStartedTask(project.name));
+  }
+
+  async interruptThread(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<void> {
+    this.requireAuthorizedUser(userId);
+    const thread = this.requireThread(slackChannelId, slackThreadTs);
+    if (thread.state !== "running") {
+      throw new Error("This Slack thread is not running an interruptible turn.");
+    }
+    if (!thread.activeTurnId) {
+      throw new Error("No active turn recorded for this Slack thread.");
+    }
+
+    if (!this.options.turnInterrupt) {
+      throw new Error("Interrupt control is not configured.");
+    }
+
+    await this.options.turnInterrupt({
+      threadId: thread.appServerThreadId,
+      turnId: thread.activeTurnId,
+    });
+
+    this.options.store.upsertThread({
+      ...thread,
+      activeTurnId: null,
+      state: "interrupted",
+    });
+  }
+
+  async submitChoice(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+    choice: string,
+  ): Promise<void> {
+    this.requireAuthorizedUser(userId);
+    const prompt = choice.trim();
+    if (!prompt) {
+      throw new Error("Choice cannot be empty.");
+    }
+
+    const thread = this.requireThread(slackChannelId, slackThreadTs);
+    if (thread.state !== "awaiting_user_input") {
+      throw new Error("This Slack thread is not waiting for a choice.");
+    }
+
+    this.options.store.upsertThread({
+      ...thread,
+      activeTurnId: null,
+      state: "running",
+    });
+
+    let turn: Record<string, unknown>;
+    try {
+      turn = await this.options.turnStart({
+        cwd: thread.worktreePath,
+        prompt,
+        threadId: thread.appServerThreadId,
+      });
+    } catch (error) {
+      this.options.store.upsertThread(thread);
+      throw error;
+    }
+
+    this.options.store.upsertThread({
+      ...thread,
+      activeTurnId: readTurnId(turn),
+      state: "running",
+    });
+  }
+
+  async startReview(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<void> {
+    this.requireAuthorizedUser(userId);
+    const thread = this.requireThread(slackChannelId, slackThreadTs);
+    if (thread.state !== "idle") {
+      throw new Error("This Slack thread is not ready for review.");
+    }
+    if (!this.options.reviewStart) {
+      throw new Error("Review control is not configured.");
+    }
+
+    const review = await this.options.reviewStart({
+      threadId: thread.appServerThreadId,
+      target: { type: "uncommittedChanges" },
+    });
+
+    this.options.store.upsertThread({
+      ...thread,
+      activeTurnId: readTurnId(review),
+      state: "running",
+    });
+  }
+
+  getThreadStatus(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): ThreadRecord | null {
+    this.requireAuthorizedUser(userId);
+    return this.options.store.getThread(slackChannelId, slackThreadTs);
+  }
+
+  async requestRestart(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<{ exitCode: number }> {
+    this.requireAuthorizedUser(userId);
+    this.requireThread(slackChannelId, slackThreadTs);
+
+    if (!this.options.requestRestart) {
+      throw new Error("Restart control is not configured.");
+    }
+
+    return this.options.requestRestart({
+      slackChannelId,
+      slackThreadTs,
+    });
+  }
+
+  async restartRouter(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<{ exitCode: number; message: string }> {
+    const result = await this.requestRestart(userId, slackChannelId, slackThreadTs);
+
+    return {
+      exitCode: result.exitCode,
+      message: "Router restart requested.",
+    };
+  }
+
+  async previewMergeToMain(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<{ text: string; blocks: MergeConfirmationBlock[] }> {
+    this.requireAuthorizedUser(userId);
+    const thread = this.requireThread(slackChannelId, slackThreadTs);
+    if (thread.state !== "idle") {
+      throw new Error("This Slack thread is not ready to preview a merge.");
+    }
+
+    if (!this.options.getRepositoryStatus) {
+      throw new Error("Merge status is not configured.");
+    }
+
+    const status = await this.options.getRepositoryStatus({
+      repoPath: thread.worktreePath,
+      sourceBranch: thread.branchName,
+      targetBranch: thread.baseBranch,
+    });
+
+    return {
+      text: `Merge ${status.sourceBranch} into ${status.targetBranch}?`,
+      blocks: buildMergeConfirmation(status),
+    };
+  }
+
+  async mergeToMain(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): Promise<{ text: string; blocks: MergeConfirmationBlock[] }> {
+    return this.previewMergeToMain(userId, slackChannelId, slackThreadTs);
+  }
+
+  async confirmMergeToMain(
+    userId: string,
+    slackChannelId: string,
+    slackThreadTs: string,
+    expectedSelection?: MergeSelection,
+  ): Promise<{ text: string }> {
+    this.requireAuthorizedUser(userId);
+    const thread = this.requireThread(slackChannelId, slackThreadTs);
+    if (thread.state !== "idle") {
+      throw new Error("This Slack thread is not ready to confirm a merge.");
+    }
+    if (
+      expectedSelection &&
+      (expectedSelection.sourceBranch !== thread.branchName ||
+        expectedSelection.targetBranch !== thread.baseBranch)
+    ) {
+      throw new Error("Merge confirmation is stale. Request a fresh merge preview.");
+    }
+    if (!this.options.getRepositoryStatus) {
+      throw new Error("Merge status is not configured.");
+    }
+    if (!this.options.executeMergeToMain) {
+      throw new Error("Merge execution is not configured.");
+    }
+
+    const status = await this.options.getRepositoryStatus({
+      repoPath: thread.worktreePath,
+      sourceBranch: thread.branchName,
+      targetBranch: thread.baseBranch,
+    });
+
+    if (status.worktreeStatus !== "clean") {
+      throw new Error("This Slack thread has uncommitted changes and cannot be merged.");
+    }
+
+    const result = await this.options.executeMergeToMain({
+      repoPath: deriveRepositoryPath(thread.worktreePath),
+      sourceBranch: thread.branchName,
+      targetBranch: thread.baseBranch,
+    });
+
+    this.options.store.upsertThread({
+      ...thread,
+      activeTurnId: null,
+      state: "idle",
+      branchName: thread.baseBranch,
+    });
+
+    return result;
+  }
+
+  private async resolveThreadWorktree(
+    repoPath: string,
+    slackThreadTs: string,
+    baseBranch: string,
+  ): Promise<ThreadWorktree> {
+    const worktree =
+      (await this.options.ensureThreadWorktree?.({
+        repoPath,
+        slackThreadTs,
+        baseBranch,
+      })) ?? {
+        worktreePath: repoPath,
+        branchName: baseBranch,
+      };
+
+    return {
+      ...worktree,
+      baseBranch,
+    };
+  }
+
+  private requireThread(
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): ThreadRecord {
+    const thread = this.options.store.getThread(slackChannelId, slackThreadTs);
+    if (!thread) {
+      throw new Error("This thread has no stored Codex session yet.");
+    }
+
+    return thread;
+  }
+
+  private requireAuthorizedUser(userId: string): void {
+    if (!this.isAuthorizedUser(userId)) {
+      throw new Error(renderUnauthorizedUser());
+    }
+  }
+
+  private isAuthorizedUser(userId: string): boolean {
+    return userId === this.options.allowedUserId;
   }
 }
 
@@ -119,17 +454,33 @@ function buildThreadRecord(
   slackChannelId: string,
   slackThreadTs: string,
   appServerThreadId: string,
-  worktreePath: string,
+  worktree: ThreadWorktree,
 ): ThreadRecord {
   return {
     slackChannelId,
     slackThreadTs,
     appServerThreadId,
+    activeTurnId: null,
     state: "running",
-    worktreePath,
-    branchName: "main",
-    baseBranch: "main",
+    ...worktree,
   };
+}
+
+function readTurnId(result: Record<string, unknown>): string | null {
+  return typeof result.turnId === "string" ? result.turnId : null;
+}
+
+function deriveRepositoryPath(worktreePath: string): string {
+  const markers = ["/.codex-worktrees/", "\\.codex-worktrees\\"];
+
+  for (const marker of markers) {
+    const markerIndex = worktreePath.indexOf(marker);
+    if (markerIndex >= 0) {
+      return worktreePath.slice(0, markerIndex);
+    }
+  }
+
+  return worktreePath;
 }
 
 function loadProjects(projectsFile: string): Map<string, ProjectConfig> {
@@ -144,6 +495,7 @@ function loadProjects(projectsFile: string): Map<string, ProjectConfig> {
     const channelId = project.channel_id?.trim();
     const name = project.name?.trim();
     const rawPath = project.path?.trim();
+    const baseBranch = project.base_branch?.trim() || "main";
 
     if (!channelId || !name || !rawPath) {
       throw new Error("Malformed project entry in project registry");
@@ -160,6 +512,7 @@ function loadProjects(projectsFile: string): Map<string, ProjectConfig> {
       channelId,
       name,
       path: projectPath,
+      baseBranch,
     });
   }
 

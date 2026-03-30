@@ -31,7 +31,6 @@ export class WorktreeManager {
     if (!this.pathExists(worktreePath)) {
       await this.run({
         args: [
-          "git",
           "worktree",
           "add",
           "-b",

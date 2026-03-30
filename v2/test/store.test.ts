@@ -12,6 +12,7 @@ describe("RouterStore", () => {
       slackChannelId: "C123",
       slackThreadTs: "1710000000.0001",
       appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
       state: "running",
       worktreePath: "/tmp/router/wt-1",
       branchName: "codex/slack/1710000000.0001",
@@ -22,6 +23,7 @@ describe("RouterStore", () => {
       slackChannelId: "C999",
       slackThreadTs: "1710000000.0001",
       appServerThreadId: "thread_xyz",
+      activeTurnId: null,
       state: "running",
       worktreePath: "/tmp/router/wt-2",
       branchName: "codex/slack/1710000000.0001-alt",
@@ -39,9 +41,11 @@ describe("RouterStore", () => {
     const restart = store.getPendingRestartIntent();
 
     expect(thread?.appServerThreadId).toBe("thread_abc");
+    expect(thread?.activeTurnId).toBe("turn_abc");
     expect(thread?.branchName).toBe("codex/slack/1710000000.0001");
     expect(thread?.worktreePath).toBe("/tmp/router/wt-1");
     expect(otherThread?.appServerThreadId).toBe("thread_xyz");
+    expect(otherThread?.activeTurnId).toBeNull();
     expect(restart?.slackChannelId).toBe("C123");
     expect(restart?.slackThreadTs).toBe("1710000000.0001");
     expect(restart?.requestedAt).toBe("2026-03-30T12:00:00Z");
@@ -54,6 +58,7 @@ describe("RouterStore", () => {
       slackChannelId: "C123",
       slackThreadTs: "1710000000.0001",
       appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
       state: "running",
       worktreePath: "/tmp/router/wt-1",
       branchName: "codex/slack/1710000000.0001",
@@ -63,6 +68,7 @@ describe("RouterStore", () => {
       slackChannelId: "C456",
       slackThreadTs: "1710000000.0002",
       appServerThreadId: "thread_def",
+      activeTurnId: null,
       state: "failed_setup",
       worktreePath: "/tmp/router/wt-2",
       branchName: "codex/slack/1710000000.0002",
@@ -80,6 +86,7 @@ describe("RouterStore", () => {
     expect(recoverable).toHaveLength(1);
     expect(recoverable[0]?.slackChannelId).toBe("C123");
     expect(recoverable[0]?.slackThreadTs).toBe("1710000000.0001");
+    expect(recoverable[0]?.activeTurnId).toBe("turn_abc");
     expect(store.getPendingRestartIntent()).toBeNull();
   });
 
@@ -93,6 +100,7 @@ describe("RouterStore", () => {
         slackChannelId: "C123",
         slackThreadTs: "1710000000.0001",
         appServerThreadId: "thread_abc",
+        activeTurnId: "turn_abc",
         state: "running",
         worktreePath: "/tmp/router/wt-1",
         branchName: "codex/slack/1710000000.0001",
@@ -111,6 +119,7 @@ describe("RouterStore", () => {
         const restart = secondStore.getPendingRestartIntent();
 
         expect(thread?.appServerThreadId).toBe("thread_abc");
+        expect(thread?.activeTurnId).toBe("turn_abc");
         expect(thread?.worktreePath).toBe("/tmp/router/wt-1");
         expect(restart?.slackChannelId).toBe("C123");
         expect(restart?.slackThreadTs).toBe("1710000000.0001");
@@ -134,6 +143,7 @@ describe("RouterStore", () => {
           slackChannelId: "C123",
           slackThreadTs: "1710000000.0001",
           appServerThreadId: "thread_abc",
+          activeTurnId: "turn_abc",
           state: "running",
           worktreePath: "/tmp/router/wt-1",
           branchName: "codex/slack/1710000000.0001",
@@ -143,6 +153,9 @@ describe("RouterStore", () => {
         expect(existsSync(dirname(databasePath))).toBe(true);
         expect(store.getThread("C123", "1710000000.0001")?.appServerThreadId).toBe(
           "thread_abc",
+        );
+        expect(store.getThread("C123", "1710000000.0001")?.activeTurnId).toBe(
+          "turn_abc",
         );
       } finally {
         store.close();

@@ -13,15 +13,19 @@ export type SlackThreadIdentity = {
   slackThreadTs: string;
 };
 
-export type ThreadRecord = {
-  slackChannelId: string;
-  slackThreadTs: string;
-  appServerThreadId: string;
-  state: ThreadState;
+export type ThreadWorktree = {
   worktreePath: string;
   branchName: string;
   baseBranch: string;
 };
+
+export type ThreadRecord = {
+  slackChannelId: string;
+  slackThreadTs: string;
+  appServerThreadId: string;
+  activeTurnId?: string | null;
+  state: ThreadState;
+} & ThreadWorktree;
 
 export type RestartIntent = SlackThreadIdentity & {
   requestedAt: string;

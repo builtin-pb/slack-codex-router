@@ -1,4 +1,5 @@
 import type { RouterService } from "../router/service.js";
+import { registerThreadControlActions } from "../runtime/control_actions.js";
 
 type SlackMessageEvent = {
   channel: string;
@@ -16,11 +17,15 @@ type SlackMessageApp = {
     name: "message",
     listener: (args: { event: SlackMessageEvent; say: SayFn }) => Promise<void>,
   ): void;
+  action?: Parameters<typeof registerThreadControlActions>[0]["action"];
 };
 
 export function registerSlackMessageHandler(
   app: SlackMessageApp,
   router: RouterService,
+  options?: {
+    requestProcessExit?(exitCode: number): void;
+  },
 ): void {
   app.event("message", async ({ event, say }) => {
     if (event.subtype) {
@@ -43,4 +48,7 @@ export function registerSlackMessageHandler(
       },
     });
   });
+  if (app.action) {
+    registerThreadControlActions({ action: app.action }, router, options);
+  }
 }

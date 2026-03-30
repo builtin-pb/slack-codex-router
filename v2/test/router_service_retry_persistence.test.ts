@@ -39,7 +39,7 @@ describe("RouterService retry persistence", () => {
     }
   });
 
-  it("keeps the App Server thread mapping if the first turn fails", async () => {
+  it("persists a failed_setup App Server thread mapping if the first turn fails", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
     const store = new RouterStore(":memory:");
@@ -73,7 +73,8 @@ describe("RouterService retry persistence", () => {
     expect(turnStart).toHaveBeenCalledTimes(1);
     expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
       appServerThreadId: "thread_abc",
-      state: "running",
+      activeTurnId: null,
+      state: "failed_setup",
       worktreePath: fixture.projectDir,
       branchName: "main",
       baseBranch: "main",

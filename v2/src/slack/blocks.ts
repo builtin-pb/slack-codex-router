@@ -66,7 +66,7 @@ export function buildThreadControls(state: {
 
 export function buildUserInputBlocks(input: {
   prompt: string;
-  options: { id: string; label: string }[];
+  options: { id: string; label: string; value?: string }[];
 }): SlackBlock[] {
   return [
     {
@@ -79,7 +79,7 @@ export function buildUserInputBlocks(input: {
     {
       type: "actions",
       elements: input.options.map((option) =>
-        buildButton(`codex_choice:${option.id}`, option.label, option.id),
+        buildButton(`codex_choice:${option.id}`, option.label, option.value ?? option.id),
       ),
     },
   ];

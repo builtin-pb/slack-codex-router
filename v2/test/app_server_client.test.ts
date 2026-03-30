@@ -64,21 +64,38 @@ describe("AppServerClient", () => {
 
     const turnStart = client.turnStart({ threadId: "thread_123", prompt: "go" });
     const turnSteer = client.turnSteer({ turnId: "turn_123", prompt: "adjust" });
-    const turnInterrupt = client.turnInterrupt({ turnId: "turn_123" });
+    const turnInterrupt = client.turnInterrupt({
+      threadId: "thread_123",
+      turnId: "turn_123",
+    });
+    const reviewStart = (
+      client as AppServerClient & {
+        reviewStart(input: Record<string, unknown>): Promise<Record<string, unknown>>;
+      }
+    ).reviewStart({
+      threadId: "thread_123",
+      target: { type: "uncommittedChanges" },
+    });
 
     expect(sent[0]).toContain('"method":"turn/start"');
     expect(sent[1]).toContain('"method":"turn/steer"');
     expect(sent[2]).toContain('"method":"turn/interrupt"');
+    expect(sent[2]).toContain('"threadId":"thread_123"');
+    expect(sent[2]).toContain('"turnId":"turn_123"');
+    expect(sent[3]).toContain('"method":"review/start"');
+    expect(sent[3]).toContain('"type":"uncommittedChanges"');
 
     client.handleLine('{"id":"1","result":{"turnId":"turn_123"}}');
     client.handleLine(
       '{"id":"2","error":{"code":400,"message":"cannot steer finished turn"}}',
     );
     client.handleLine('{"id":"3","result":{}}');
+    client.handleLine('{"id":"4","result":{"reviewId":"review_123"}}');
 
     await expect(turnStart).resolves.toEqual({ turnId: "turn_123" });
     await expect(turnSteer).rejects.toThrow("cannot steer finished turn");
     await expect(turnInterrupt).resolves.toBeUndefined();
+    await expect(reviewStart).resolves.toEqual({ reviewId: "review_123" });
   });
 
   it("matches out-of-order responses to the original request ids", async () => {
@@ -146,6 +163,51 @@ describe("AppServerClient", () => {
       {
         method: "thread/status/changed",
         params: { threadId: "thread_123", state: "running" },
+      },
+    ]);
+  });
+
+  it("parses current item lifecycle notifications and preserves legacy turn/item compatibility", () => {
+    const notifications: AppServerNotification[] = [];
+    const client = new AppServerClient({
+      writeLine: () => {},
+    });
+
+    client.events.subscribe((notification) => {
+      notifications.push(notification);
+    });
+
+    client.handleLine(
+      '{"method":"item/completed","params":{"threadId":"thread_123","item":{"type":"message","role":"assistant","text":"Working on it."}}}',
+    );
+    client.handleLine(
+      '{"method":"item/agentMessage/delta","params":{"threadId":"thread_123","delta":"Working"}}',
+    );
+    client.handleLine(
+      '{"method":"turn/item","params":{"threadId":"thread_123","item":{"type":"message","role":"assistant","text":"Legacy item."}}}',
+    );
+
+    expect(notifications).toEqual([
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread_123",
+          item: { type: "message", role: "assistant", text: "Working on it." },
+        },
+      },
+      {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread_123",
+          delta: "Working",
+        },
+      },
+      {
+        method: "turn/item",
+        params: {
+          threadId: "thread_123",
+          item: { type: "message", role: "assistant", text: "Legacy item." },
+        },
       },
     ]);
   });

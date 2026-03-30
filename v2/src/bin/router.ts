@@ -1,17 +1,24 @@
 import { App } from "@slack/bolt";
+import { execFile } from "node:child_process";
 import { config as loadDotenv } from "dotenv";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { AppServerClient } from "../app_server/client.js";
 import { spawnAppServerProcess } from "../app_server/process.js";
 import { loadConfig, repoRootPath } from "../config.js";
+import { mergeBranchToTarget } from "../git/merge_to_main.js";
+import { getRepositoryStatus } from "../git/repository_status.js";
 import { RouterStore } from "../persistence/store.js";
+import { requestRouterRestart } from "../runtime/restart.js";
 import { startRouterRuntime } from "../router/runtime.js";
 import { RouterService } from "../router/service.js";
 import { registerSlackMessageHandler } from "../slack/app.js";
+import { WorktreeManager } from "../worktree/manager.js";
 
 const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? resolve(repoRootPath, ".env");
+const execFileAsync = promisify(execFile);
 
 loadDotenv({ path: dotenvPath });
 
@@ -35,6 +42,12 @@ export async function main(): Promise<void> {
       appServerProcess.writeLine(line);
     },
   });
+  const worktreeManager = new WorktreeManager({
+    pathExists: existsSync,
+    run: async ({ args, cwd }) => {
+      await execFileAsync("git", args, { cwd });
+    },
+  });
   const slackApp = new App({
     token: config.slackBotToken,
     appToken: config.slackAppToken,
@@ -47,6 +60,35 @@ export async function main(): Promise<void> {
     threadStart: async (input) =>
       appServerClient.threadStart(input) as Promise<{ threadId: string }>,
     turnStart: async (input) => appServerClient.turnStart(input),
+    ensureThreadWorktree: async (input) => worktreeManager.ensureThreadWorktree(input),
+    turnInterrupt: async (input) => appServerClient.turnInterrupt(input),
+    reviewStart: async (input) => appServerClient.reviewStart(input),
+    requestRestart: async (input) =>
+      requestRouterRestart({
+        store,
+        slackChannelId: input.slackChannelId,
+        slackThreadTs: input.slackThreadTs,
+      }),
+    getRepositoryStatus: async (input) =>
+      getRepositoryStatus({
+        repoPath: input.repoPath,
+        sourceBranch: input.sourceBranch,
+        targetBranch: input.targetBranch,
+        run: async ({ args, cwd }) => {
+          const result = await execFileAsync("git", args, { cwd });
+          return { stdout: result.stdout };
+        },
+      }),
+    executeMergeToMain: async (input) =>
+      mergeBranchToTarget({
+        repoPath: input.repoPath,
+        sourceBranch: input.sourceBranch,
+        targetBranch: input.targetBranch,
+        run: async ({ args, cwd }) => {
+          const result = await execFileAsync("git", args, { cwd });
+          return { stdout: result.stdout };
+        },
+      }),
   });
 
   try {
@@ -61,6 +103,14 @@ export async function main(): Promise<void> {
         registerSlackMessageHandler(
           app as Parameters<typeof registerSlackMessageHandler>[0],
           router as Parameters<typeof registerSlackMessageHandler>[1],
+          {
+            requestProcessExit(exitCode) {
+              process.exitCode = exitCode;
+              setTimeout(() => {
+                process.exit(exitCode);
+              }, 0);
+            },
+          },
         );
       },
     });

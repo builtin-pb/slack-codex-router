@@ -74,7 +74,8 @@ describe("RouterService retry resume", () => {
 
     expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
       appServerThreadId: "thread_abc",
-      state: "running",
+      activeTurnId: null,
+      state: "failed_setup",
       worktreePath: fixture.projectDir,
       branchName: "main",
       baseBranch: "main",
@@ -105,6 +106,7 @@ describe("RouterService retry resume", () => {
     });
     expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
       appServerThreadId: "thread_abc",
+      activeTurnId: "turn_retry",
       state: "running",
       worktreePath: fixture.projectDir,
       branchName: "main",

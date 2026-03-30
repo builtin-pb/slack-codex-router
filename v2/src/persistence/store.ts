@@ -16,6 +16,10 @@ type DatabaseHandle = {
   close(): void;
 };
 
+type TableInfoRow = {
+  name: string;
+};
+
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3") as new (databasePath: string) => DatabaseHandle;
 
@@ -32,6 +36,7 @@ export class RouterStore {
 
     this.db = new Database(databasePath);
     this.db.exec(bootstrapSql);
+    this.ensureThreadsActiveTurnIdColumn();
   }
 
   upsertThread(record: ThreadRecord): void {
@@ -42,15 +47,17 @@ export class RouterStore {
           slack_channel_id,
           slack_thread_ts,
           app_server_thread_id,
+          active_turn_id,
           state,
           worktree_path,
           branch_name,
           base_branch
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slack_channel_id, slack_thread_ts) DO UPDATE SET
           slack_channel_id = excluded.slack_channel_id,
           slack_thread_ts = excluded.slack_thread_ts,
           app_server_thread_id = excluded.app_server_thread_id,
+          active_turn_id = excluded.active_turn_id,
           state = excluded.state,
           worktree_path = excluded.worktree_path,
           branch_name = excluded.branch_name,
@@ -61,6 +68,7 @@ export class RouterStore {
         record.slackChannelId,
         record.slackThreadTs,
         record.appServerThreadId,
+        record.activeTurnId ?? null,
         record.state,
         record.worktreePath,
         record.branchName,
@@ -79,6 +87,7 @@ export class RouterStore {
           slack_channel_id AS slackChannelId,
           slack_thread_ts AS slackThreadTs,
           app_server_thread_id AS appServerThreadId,
+          active_turn_id AS activeTurnId,
           state,
           worktree_path AS worktreePath,
           branch_name AS branchName,
@@ -89,7 +98,7 @@ export class RouterStore {
       )
       .get(slackChannelId, slackThreadTs) as ThreadRow | undefined;
 
-    return row ?? null;
+    return row ? normalizeThreadRow(row) : null;
   }
 
   listRecoverableThreads(): ThreadRecord[] {
@@ -100,6 +109,7 @@ export class RouterStore {
           slack_channel_id AS slackChannelId,
           slack_thread_ts AS slackThreadTs,
           app_server_thread_id AS appServerThreadId,
+          active_turn_id AS activeTurnId,
           state,
           worktree_path AS worktreePath,
           branch_name AS branchName,
@@ -109,7 +119,8 @@ export class RouterStore {
         ORDER BY slack_channel_id ASC, slack_thread_ts ASC
       `,
       )
-      .all() as ThreadRow[];
+      .all()
+      .map((row) => normalizeThreadRow(row as ThreadRow));
   }
 
   recordRestartIntent(intent: RestartIntent): void {
@@ -155,4 +166,23 @@ export class RouterStore {
   close(): void {
     this.db.close();
   }
+
+  private ensureThreadsActiveTurnIdColumn(): void {
+    const columns = this.db
+      .prepare("PRAGMA table_info(threads)")
+      .all() as TableInfoRow[];
+
+    if (columns.some((column) => column.name === "active_turn_id")) {
+      return;
+    }
+
+    this.db.exec("ALTER TABLE threads ADD COLUMN active_turn_id TEXT;");
+  }
+}
+
+function normalizeThreadRow(row: ThreadRow): ThreadRow {
+  return {
+    ...row,
+    activeTurnId: row.activeTurnId ?? null,
+  };
 }

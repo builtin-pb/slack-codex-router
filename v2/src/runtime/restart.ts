@@ -6,6 +6,23 @@ export function isRestartExitCode(exitCode: number): boolean {
   return exitCode === RESTART_EXIT_CODE;
 }
 
+export async function requestRouterRestart(input: {
+  store: {
+    recordRestartIntent(intent: RestartIntent): void;
+  };
+  slackChannelId: string;
+  slackThreadTs: string;
+  requestedAt?: string;
+}): Promise<{ exitCode: number }> {
+  input.store.recordRestartIntent({
+    slackChannelId: input.slackChannelId,
+    slackThreadTs: input.slackThreadTs,
+    requestedAt: input.requestedAt ?? new Date().toISOString(),
+  });
+
+  return { exitCode: RESTART_EXIT_CODE };
+}
+
 export async function recoverAfterRestart(input: {
   pendingRestartIntent: RestartIntent | null;
   recoverableThreads: ThreadRecord[];
