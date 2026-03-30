@@ -26,6 +26,19 @@ dev = [
 [project.scripts]
 slack-codex-router = "slack_codex_router.main:main"
 
+[tool.hatch.build.targets.wheel]
+packages = ["legacy/v1/src/slack_codex_router"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "legacy/v1/src/slack_codex_router",
+  "legacy/v1/tests",
+  "legacy/v1/config",
+  "legacy/v1/scripts",
+  "legacy/v1/README.md",
+  "README.md",
+]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
+pythonpath = ["legacy/v1/src"]
+testpaths = ["legacy/v1/tests"]
