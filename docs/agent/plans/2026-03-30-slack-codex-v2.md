@@ -81,7 +81,7 @@ Run: `python - <<'PY'\nfrom pathlib import Path\nrepo = Path.cwd()\nassert (repo
 Expected: fail because `legacy/v1/src/slack_codex_router` does not exist yet.
 
 - [x] **Step 3: Move the Python router, tests, and v1 docs into `legacy/v1`**
-Observed: Moved `src/slack_codex_router`, the Python `tests/test_*.py` files plus fixture, the March 29 v1 spec/plan docs, `config/projects.example.yaml`, and the original wrapper into `legacy/v1`; added `legacy/v1/README.md`, a `legacy/v1/tests/conftest.py` path shim, and updated `legacy/v1/scripts/start-router-v1.sh` so it still launches the archived router from `legacy/v1/src` while reading the repo-root `.env`. Follow-up stabilization also pointed root `pyproject.toml` packaging and default `pytest` discovery at `legacy/v1` so root developer commands continue to exercise the archived v1 code.
+Observed: Moved `src/slack_codex_router`, the Python `tests/test_*.py` files plus fixture, the March 29 v1 spec/plan docs, `config/projects.example.yaml`, and the original wrapper into `legacy/v1`; added `legacy/v1/README.md`, a `legacy/v1/tests/conftest.py` path shim, and updated `legacy/v1/scripts/start-router-v1.sh` so it still launches the archived router from `legacy/v1/src` while reading the repo-root `.env`. Follow-up stabilization also pointed root `pyproject.toml` packaging and default `pytest` discovery at `legacy/v1`, and kept the root wrapper as a delegate-only handoff that prints the `v2`-not-ready message before execing `legacy/v1/scripts/start-router-v1.sh`.
 
 ```bash
 mkdir -p legacy/v1/src legacy/v1/tests/fixtures legacy/v1/docs/specs legacy/v1/docs/plans legacy/v1/scripts legacy/v1/config
@@ -99,18 +99,14 @@ Create `legacy/v1/README.md` describing:
 - the repo root is being repurposed for `v2`
 - `legacy/v1/scripts/start-router-v1.sh` is the historical wrapper
 
-Create a new root `scripts/start-router.sh` that only delegates:
+Create a new root `scripts/start-router.sh` that only delegates to archived `v1` for now:
 
 ```bash
 #!/bin/sh
 set -eu
+
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-
-if [ -x "$ROOT_DIR/v2/dist/bin/launcher.js" ] || [ -f "$ROOT_DIR/v2/package.json" ]; then
-  echo "v2 startup is not implemented yet in this task."
-  exit 1
-fi
 
 echo "v2 is not ready yet; delegating to archived legacy/v1 router." >&2
 exec "$ROOT_DIR/legacy/v1/scripts/start-router-v1.sh" "$@"
@@ -119,7 +115,7 @@ exec "$ROOT_DIR/legacy/v1/scripts/start-router-v1.sh" "$@"
 Update root `README.md` so the first screen says:
 - `v1` is archived under `legacy/v1`
 - `v2` is the active rewrite target
-- current root wrapper temporarily delegates to the archived `v1` script until `v2` lands
+- current root wrapper temporarily prints that `v2` is not ready yet, then delegates to the archived `v1` script until `v2` lands
 
 - [x] **Step 4: Run the archive checks**
 Observed: The layout assertion passed via `python3`, printing `archive layout ok`; follow-up verification also kept the root handoff stable by fixing the archived fixture path, adding a root-wrapper delegation test, making `scripts/start-router.sh` always delegate during early `v2` work, and rerunning `uv run pytest legacy/v1/tests` (`92 passed in 1.13s`), `uv run pytest` (`92 passed in 1.16s`), and `uv run python -m slack_codex_router.main run --help` (printed argparse help and exited 0) successfully.
