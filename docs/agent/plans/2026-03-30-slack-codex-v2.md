@@ -533,7 +533,10 @@ describe("buildLauncher", () => {
     const launcher = buildLauncher({
       spawnWorker: async () => {
         launches.push("worker");
-        return { wait: async () => 75 };
+        return {
+          wait: async () =>
+            launches.length === 1 ? 75 : 0,
+        };
       },
     });
 
