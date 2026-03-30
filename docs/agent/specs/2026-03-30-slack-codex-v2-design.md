@@ -27,6 +27,8 @@ The existing Slack bot/app must be reused through the current `.env` configurati
 - Make richer App Server progress easy to add later by rendering more event types rather than changing control flow.
 - Reuse the current Slack bot credentials and allowed-user setup from `.env`.
 - Support clean restart recovery for active and recently completed threads.
+- Allow Slack-driven work on this router repository itself without trapping the system in a self-restart dead end.
+- Support automatic pickup for safe runtime/config changes when possible and a safe Slack-triggered router restart for code changes.
 
 ## Non-Goals
 
@@ -35,6 +37,7 @@ The existing Slack bot/app must be reused through the current `.env` configurati
 - Do not duplicate Codex transcripts or invent a second source of truth for agent state.
 - Do not require the user to type long merge or handoff instructions in Slack.
 - Do not assume Codex App Server itself provides a stable server-side worktree-management API for Slack clients.
+- Do not require the user to recreate the Slack bot or manually babysit router restarts after editing this repository.
 
 ## Primary Decisions
 
@@ -47,29 +50,59 @@ The existing Slack bot/app must be reused through the current `.env` configurati
 - Allocate one dedicated Git worktree per top-level Slack thread.
 - Default worktrees to named auto-branches rather than detached HEAD because Slack-native merge controls are simpler and safer on named branches.
 - Require one confirmation card before `Merge to main`.
+- Split operational responsibility so router code can be restarted safely without killing the thread that requested the restart.
 
 ## Runtime Architecture
 
 ### Core Structure
 
-The `v2` service contains six major parts:
+The `v2` system contains seven major parts:
 
-1. Slack event adapter
-2. Codex App Server client
-3. App Server event normalizer
-4. Slack renderer and control-action handler
-5. Worktree manager
-6. Persistence and recovery store
+1. Router supervisor
+2. Slack worker
+3. Codex App Server client or bridge
+4. App Server event normalizer
+5. Slack renderer and control-action handler
+6. Worktree manager
+7. Persistence and recovery store
 
 The runtime model is:
 
+- supervisor keeps the Slack worker alive and can replace it safely
 - Slack top-level message starts a Slack task thread
-- router allocates or resolves a worktree for that Slack thread
-- router starts or resumes an App Server thread
-- router sends `turn/start` to App Server with `cwd` pointing at the worktree
-- router subscribes to App Server notifications and renders them into the Slack thread
+- worker allocates or resolves a worktree for that Slack thread
+- worker starts or resumes an App Server thread
+- worker sends `turn/start` to App Server with `cwd` pointing at the worktree
+- worker subscribes to App Server notifications and renders them into the Slack thread
 - Slack replies become either `turn/start` or `turn/steer`
-- Slack control actions map to App Server calls or worktree-management actions
+- Slack control actions map to App Server calls, supervisor actions, or worktree-management actions
+
+### Supervisor Boundary
+
+Because the user wants to improve this repository from Slack itself, `v2` cannot be a single mutable process that owns both Slack connectivity and the only live App Server relationship.
+
+The design therefore introduces a small stable supervisor process:
+
+- starts the Slack worker
+- monitors worker readiness and health
+- restarts or replaces the worker on request
+- preserves enough runtime state for worker handoff
+- ensures a requested restart does not terminate the requesting task thread abruptly
+
+The worker contains the frequently changing router application logic. The supervisor should be deliberately smaller and more stable than the worker.
+
+### App Server Connection Boundary
+
+To support safe worker restarts, the App Server lifecycle must not be tightly coupled to the worker process in a way that kills active threads on worker replacement.
+
+`v2` should therefore keep a restart-safe boundary between the worker and App Server by one of these implementation patterns:
+
+- a long-lived App Server bridge process owned by the supervisor
+- or an equivalent restart-safe sidecar arrangement
+
+The worker then reconnects to that boundary after restart and rebuilds subscriptions.
+
+This preserves the earlier design goal of treating App Server as the execution authority while allowing the router code to restart safely.
 
 ### Why Node-first
 
@@ -93,6 +126,7 @@ At minimum, the following existing operational assumptions must be preserved:
 Additional `v2` settings may be added for:
 
 - App Server launch settings
+- supervisor and worker launch settings
 - worktree root location
 - branch naming template
 - validation hooks before merge
@@ -134,9 +168,27 @@ The thread should expose native controls for:
 - `What changed`
 - `Open diff`
 - `Merge to main`
+- `Restart router`
 - `Archive task`
 
 Controls may appear conditionally based on thread state.
+
+### Router Self-Management Controls
+
+The router must support its own repository being worked on through Slack.
+
+Operational controls should include:
+
+- `Restart router`
+- optional `Reload config`
+
+Expected behavior:
+
+- `Reload config` picks up safe configuration changes that can be applied without replacing the worker.
+- `Restart router` asks the supervisor to replace the worker safely.
+- the requesting Slack thread must survive the restart and receive a completion or recovery message after the new worker is ready.
+
+The user should not need to type a long operational instruction for this. A native Slack control is the preferred surface.
 
 ## App Server Thread and Event Model
 
@@ -280,6 +332,7 @@ Persist:
 - App Server thread id
 - active turn id
 - current runtime state
+- worker generation or handoff marker where needed for restart safety
 - worktree path
 - branch name
 - base branch
@@ -305,6 +358,21 @@ After router restart:
 
 Recovery must prefer App Server state over local guesses.
 
+### Worker Restart Recovery
+
+Safe restart is a first-class recovery path, not an edge case.
+
+When the supervisor replaces the worker:
+
+1. old worker stops accepting new Slack events
+2. supervisor launches new worker and waits for readiness
+3. new worker reloads persisted thread records
+4. new worker reconnects to the App Server boundary
+5. new worker restores subscriptions and Slack controls
+6. requesting thread receives a short success or failure update
+
+If the restart was initiated from Slack while a task thread was active, that thread must remain resumable after worker handoff.
+
 ## Failure Handling
 
 ### Slack delivery failure
@@ -314,6 +382,14 @@ Slack delivery problems must not destroy App Server state. Slack rendering retri
 ### App Server disconnect
 
 If App Server disconnects, affected Slack threads should move into a degraded state. On reconnect, the router should rebuild state from App Server thread information rather than assuming the turn is lost.
+
+### Worker replacement failure
+
+If a requested router restart fails:
+
+- the supervisor should retain or roll back to the last healthy worker when possible
+- the requesting Slack thread should receive an operational failure message
+- active App Server threads and worktrees must remain recoverable
 
 ### Worktree setup failure
 
@@ -331,6 +407,8 @@ Testing should cover:
 - `turn/start` vs `turn/steer` routing
 - control-action handling
 - interactive Block Kit prompt rendering
+- safe `Restart router` behavior from within a Slack thread working on this repository
+- config reload versus worker restart behavior
 - worktree allocation per top-level Slack thread
 - concurrent threads in the same repository
 - merge-to-main confirmation and execution
@@ -350,10 +428,11 @@ Because this is a breaking `v2`, start with a fresh persistence schema.
 
 Recommended phase order:
 
-1. App Server client, Slack thread mapping, and basic turn streaming
+1. supervisor/worker boundary, App Server connection boundary, and basic turn streaming
 2. interactive prompts, control strip, and explicit interrupt/review support
 3. worktree manager and merge-to-main flow
-4. recovery, failure hardening, and richer event rendering
+4. config reload, safe restart flow, recovery, and failure hardening
+5. richer event rendering
 
 `v2` should be validated in a real private Slack channel before the old router is retired.
 
