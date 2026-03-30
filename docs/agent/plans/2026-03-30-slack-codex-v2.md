@@ -396,7 +396,7 @@ Run: `npm --prefix v2 test -- test/config.test.ts`
 Expected: `2 passed`
 
 - [x] **Step 5: Commit**
-Observed: Created the initial bootstrap commit `88218c3` with the requested message `feat: bootstrap slack codex router v2 workspace`, including the new workspace files and the Task 1 plan-log update. Later Task 1 quality fixes landed in follow-up commits `b79d174` (root `.env` reuse, `SCR_*` aliases, and quoted command parsing) and `af4fa1f` (final plan-log alignment).
+Observed: Created the initial bootstrap commit `88218c3` with the requested message `feat: bootstrap slack codex router v2 workspace`, including the new workspace files and the Task 1 plan-log update. Later Task 1 quality fixes and plan-log corrections landed in follow-up commits, so the bootstrap commit below should be read as the first Task 1 checkpoint rather than the entire Task 1 history.
 
 ```bash
 git add docs/agent/plans/2026-03-30-slack-codex-v2.md v2/package.json v2/tsconfig.json v2/.env.example v2/.gitignore v2/package-lock.json v2/src/config.ts v2/src/bin/router.ts v2/test/config.test.ts
