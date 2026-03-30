@@ -77,4 +77,65 @@ describe("spawnAppServerProcess", () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("drains stderr so a chatty child can still deliver stdout readiness", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-stderr-"));
+
+    try {
+      const scriptPath = join(tempDir, "stderr-backpressure.mjs");
+      writeFileSync(
+        scriptPath,
+        [
+          'const chunk = "x".repeat(64 * 1024);',
+          "let writes = 0;",
+          "",
+          "function pump() {",
+          "  while (writes < 256) {",
+          "    writes += 1;",
+          "    if (!process.stderr.write(chunk)) {",
+          '      process.stderr.once("drain", pump);',
+          "      return;",
+          "    }",
+          "  }",
+          '  process.stdout.write("ready\\n", () => process.exit(0));',
+          "}",
+          "",
+          "pump();",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const appServer = spawnAppServerProcess([process.execPath, scriptPath], {
+        cwd: tempDir,
+      });
+      const lines: string[] = [];
+
+      const unsubscribe = appServer.onLine((line) => {
+        lines.push(line);
+      });
+
+      try {
+        const timeout = Symbol("timeout");
+        const readyResult = await Promise.race([
+          (async () => {
+            while (lines.length === 0) {
+              await delay(10);
+            }
+
+            return lines[0];
+          })(),
+          delay(1_000, timeout),
+        ]);
+
+        expect(readyResult).toBe("ready");
+        await expect(appServer.waitForExit()).resolves.toBe(0);
+      } finally {
+        unsubscribe();
+        appServer.child.kill();
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

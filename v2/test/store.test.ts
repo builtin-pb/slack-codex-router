@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RouterStore } from "../src/persistence/store.js";
 
@@ -116,6 +116,36 @@ describe("RouterStore", () => {
         expect(restart?.slackThreadTs).toBe("1710000000.0001");
       } finally {
         secondStore.close();
+      }
+    } finally {
+      rmSync(databaseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates missing parent directories for on-disk sqlite databases", () => {
+    const databaseDir = mkdtempSync(join(tmpdir(), "router-store-nested-"));
+    const databasePath = join(databaseDir, "nested", "router", "state.sqlite3");
+
+    try {
+      const store = new RouterStore(databasePath);
+
+      try {
+        store.upsertThread({
+          slackChannelId: "C123",
+          slackThreadTs: "1710000000.0001",
+          appServerThreadId: "thread_abc",
+          state: "running",
+          worktreePath: "/tmp/router/wt-1",
+          branchName: "codex/slack/1710000000.0001",
+          baseBranch: "main",
+        });
+
+        expect(existsSync(dirname(databasePath))).toBe(true);
+        expect(store.getThread("C123", "1710000000.0001")?.appServerThreadId).toBe(
+          "thread_abc",
+        );
+      } finally {
+        store.close();
       }
     } finally {
       rmSync(databaseDir, { recursive: true, force: true });

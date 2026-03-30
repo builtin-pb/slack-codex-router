@@ -656,15 +656,16 @@ export class AppServerClient {
   turnStart(input: Record<string, unknown>): Promise<Record<string, unknown>> { /* request */ }
   turnSteer(input: Record<string, unknown>): Promise<Record<string, unknown>> { /* request */ }
   turnInterrupt(input: Record<string, unknown>): Promise<void> { /* request */ }
+  failPendingRequests(error: Error): void { /* reject all in-flight requests */ }
   handleLine(line: string): void { /* resolve promises or emit notifications */ }
 }
 ```
 
 - [x] **Step 4: Run the App Server client test**
-Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id and to cover synchronous write failures plus transport teardown (`1 passed`, `7 passed` tests). Follow-up transport verification also added `v2/test/app_server_process.test.ts` for fast-exit `waitForExit()` behavior (`1 passed`, `2 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` succeeded.
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed after extending the contract to prove out-of-order responses settle the correct promise by request id and to cover synchronous write failures plus transport teardown (`8 passed` tests). Follow-up transport verification also added `v2/test/app_server_process.test.ts` for fast-exit `waitForExit()` behavior and `stderr` backpressure draining (`3 passed` tests), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` succeeded.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
-Expected: `1 passed`
+Expected: `8 passed`
 
 - [x] **Step 5: Commit**
 Observed: Created the requested commit with message `feat: add codex app server client` (`5bce571`).

@@ -28,6 +28,7 @@ export function spawnAppServerProcess(
     env: options.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
+  child.stderr.resume();
 
   const lineReader = createInterface({
     input: child.stdout,

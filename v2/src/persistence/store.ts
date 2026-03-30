@@ -1,4 +1,6 @@
+import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname } from "node:path";
 import type { RestartIntent, ThreadRecord } from "../domain/types.js";
 import { bootstrapSql } from "./schema.js";
 
@@ -24,6 +26,10 @@ export class RouterStore {
   private readonly db: DatabaseHandle;
 
   constructor(databasePath: string) {
+    if (databasePath !== ":memory:") {
+      mkdirSync(dirname(databasePath), { recursive: true });
+    }
+
     this.db = new Database(databasePath);
     this.db.exec(bootstrapSql);
   }

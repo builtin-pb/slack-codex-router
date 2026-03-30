@@ -1,11 +1,9 @@
 import { config as loadDotenv } from "dotenv";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig } from "../config.js";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { loadConfig, repoRootPath } from "../config.js";
 
-const routerDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(routerDir, "../../..");
-const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? resolve(repoRoot, ".env");
+const dotenvPath = process.env.DOTENV_CONFIG_PATH ?? resolve(repoRootPath, ".env");
 
 loadDotenv({ path: dotenvPath });
 

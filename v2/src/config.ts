@@ -1,3 +1,6 @@
+import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export type RouterConfig = {
   slackBotToken: string;
   slackAppToken: string;
@@ -7,6 +10,11 @@ export type RouterConfig = {
   appServerCommand: string[];
 };
 
+export const repoRootPath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RouterConfig {
   return {
     slackBotToken: requireEnv(env, "SLACK_BOT_TOKEN"),
@@ -15,14 +23,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RouterConfig {
       "SLACK_ALLOWED_USER_ID",
       "ALLOWED_SLACK_USER_ID",
     ]),
-    projectsFile: optionalAnyEnv(env, [
-      "PROJECTS_FILE",
-      "SCR_PROJECTS_FILE",
-    ], "config/projects.yaml"),
-    routerStateDb: optionalAnyEnv(env, [
-      "ROUTER_STATE_DB",
-      "SCR_STATE_DB",
-    ], "logs/router-v2/state.sqlite3"),
+    projectsFile: resolveRepoRootPath(
+      optionalAnyEnv(env, ["PROJECTS_FILE", "SCR_PROJECTS_FILE"], "config/projects.yaml"),
+    ),
+    routerStateDb: resolveRepoRootPath(
+      optionalAnyEnv(env, ["ROUTER_STATE_DB", "SCR_STATE_DB"], "logs/router-v2/state.sqlite3"),
+    ),
     appServerCommand: parseCommand(
       env.CODEX_APP_SERVER_COMMAND ?? "codex app-server",
     ),
@@ -64,6 +70,14 @@ function optionalAnyEnv(
   }
 
   return defaultValue;
+}
+
+function resolveRepoRootPath(pathValue: string): string {
+  if (isAbsolute(pathValue)) {
+    return pathValue;
+  }
+
+  return resolve(repoRootPath, pathValue);
 }
 
 function parseCommand(command: string): string[] {
