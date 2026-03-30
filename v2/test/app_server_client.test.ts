@@ -96,4 +96,64 @@ describe("AppServerClient", () => {
     await expect(second).rejects.toThrow("second request failed");
     await expect(first).resolves.toEqual({ threadId: "thread_first" });
   });
+
+  it("stops delivering notifications after unsubscribe", () => {
+    const notifications: AppServerNotification[] = [];
+    const client = new AppServerClient({
+      writeLine: () => {},
+    });
+
+    const unsubscribe = client.events.subscribe((notification) => {
+      notifications.push(notification);
+    });
+
+    client.handleLine(
+      '{"method":"thread/status/changed","params":{"threadId":"thread_123","state":"running"}}',
+    );
+    unsubscribe();
+    client.handleLine(
+      '{"method":"turn/item","params":{"turnId":"turn_123","itemId":"item_1"}}',
+    );
+
+    expect(notifications).toEqual([
+      {
+        method: "thread/status/changed",
+        params: { threadId: "thread_123", state: "running" },
+      },
+    ]);
+  });
+
+  it("ignores invalid JSON and unmatched response ids until the matching response arrives", async () => {
+    const sent: string[] = [];
+    let nextId = 1;
+    const client = new AppServerClient({
+      writeLine: (line) => sent.push(line),
+      createRequestId: () => String(nextId++),
+    });
+
+    const request = client.threadStart({ prompt: "hello" });
+    let settled = false;
+    request.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    client.handleLine("not json");
+    client.handleLine(
+      '{"method":"thread/status/changed","params":"not-an-object"}',
+    );
+    client.handleLine('{"id":"999","result":{"threadId":"wrong"}}');
+
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+
+    client.handleLine('{"id":"1","result":{"threadId":"thread_123"}}');
+
+    await expect(request).resolves.toEqual({ threadId: "thread_123" });
+  });
 });
