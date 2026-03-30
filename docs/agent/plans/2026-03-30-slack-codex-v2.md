@@ -588,7 +588,8 @@ Observed: `npm --prefix v2 test -- test/launcher.test.ts` passed with `1 passed`
 Run: `npm --prefix v2 test -- v2/test/launcher.test.ts`  
 Expected: `1 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Created the requested implementation commit as `0fa41b1` with message `feat: add router v2 launcher`; the Task 3 plan log is recorded afterward in place rather than via amend.
 
 ```bash
 git add v2/src/bin/launcher.ts v2/src/runtime/launcher.ts v2/src/runtime/restart.ts v2/test/launcher.test.ts
