@@ -33,6 +33,15 @@ export async function main(): Promise<void> {
   }
 
   const store = new RouterStore(config.routerStateDb);
+  let storeClosed = false;
+  const closeStore = (): void => {
+    if (storeClosed) {
+      return;
+    }
+
+    store.close();
+    storeClosed = true;
+  };
   const appServerProcess = spawnAppServerProcess(config.appServerCommand, {
     cwd: repoRootPath,
     env: process.env,
@@ -105,6 +114,7 @@ export async function main(): Promise<void> {
           router as Parameters<typeof registerSlackMessageHandler>[1],
           {
             requestProcessExit(exitCode) {
+              closeStore();
               process.exitCode = exitCode;
               setTimeout(() => {
                 process.exit(exitCode);
@@ -117,7 +127,7 @@ export async function main(): Promise<void> {
 
     await appServerProcess.waitForExit();
   } finally {
-    store.close();
+    closeStore();
   }
 }
 

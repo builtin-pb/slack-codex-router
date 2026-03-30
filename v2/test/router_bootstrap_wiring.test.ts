@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const startRouterRuntime = vi.fn().mockResolvedValue(undefined);
 const waitForExit = vi.fn().mockResolvedValue(0);
+const registerSlackMessageHandler = vi.fn();
+const storeClose = vi.fn();
 const spawnAppServerProcess = vi.fn(() => ({
   writeLine: vi.fn(),
   onLine: vi.fn().mockReturnValue(() => {}),
@@ -41,7 +43,9 @@ vi.mock("../src/router/service.js", () => ({
 
 vi.mock("../src/persistence/store.js", () => ({
   RouterStore: class MockRouterStore {
-    close(): void {}
+    close(): void {
+      storeClose();
+    }
     recordRestartIntent = vi.fn();
   },
 }));
@@ -60,6 +64,10 @@ vi.mock("../src/app_server/client.js", () => ({
     turnInterrupt = vi.fn();
     reviewStart = vi.fn();
   },
+}));
+
+vi.mock("../src/slack/app.js", () => ({
+  registerSlackMessageHandler,
 }));
 
 describe("router bootstrap wiring", () => {
@@ -90,6 +98,8 @@ describe("router bootstrap wiring", () => {
     waitForExit.mockClear();
     spawnAppServerProcess.mockClear();
     routerServiceConstructor.mockClear();
+    registerSlackMessageHandler.mockReset();
+    storeClose.mockReset();
     vi.resetModules();
   });
 
@@ -139,5 +149,67 @@ describe("router bootstrap wiring", () => {
       projectsFile: projectsPath,
       ensureThreadWorktree: expect.any(Function),
     });
+  });
+
+  it("wires Slack control actions through the bootstrap wrapper and closes the store", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "router-bootstrap-wrapper-"));
+    const dotenvPath = join(tempDir, "router.env");
+    const projectsPath = join(tempDir, "projects.yaml");
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      return code === undefined ? undefined : Number(code);
+    }) as typeof process.exit);
+
+    vi.useFakeTimers();
+    registerSlackMessageHandler.mockImplementation((_app, _router, options) => {
+      options?.requestProcessExit?.(75);
+    });
+    startRouterRuntime.mockImplementation(async (input) => {
+      input.registerSlackMessageHandler({ event: vi.fn(), action: vi.fn() }, {});
+    });
+
+    writeFileSync(
+      dotenvPath,
+      [
+        "SLACK_BOT_TOKEN=xoxb-bootstrap-test",
+        "SLACK_APP_TOKEN=xapp-bootstrap-test",
+        "SLACK_ALLOWED_USER_ID=U123",
+        `SCR_PROJECTS_FILE=${projectsPath}`,
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      projectsPath,
+      [
+        "projects:",
+        "  - channel_id: C08TEMPLATE",
+        "    name: template",
+        `    path: ${JSON.stringify(tempDir)}`,
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      for (const key of keysToClear) {
+        previousEnv.set(key, process.env[key]);
+        delete process.env[key];
+      }
+
+      process.env.DOTENV_CONFIG_PATH = dotenvPath;
+
+      const { main } = await import("../src/bin/router.js");
+      await main();
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    expect(registerSlackMessageHandler).toHaveBeenCalledTimes(1);
+    expect(registerSlackMessageHandler.mock.calls[0]?.[2]).toEqual({
+      requestProcessExit: expect.any(Function),
+    });
+    expect(process.exitCode).toBe(75);
+    expect(exitSpy).toHaveBeenCalledWith(75);
+    expect(storeClose).toHaveBeenCalledTimes(1);
   });
 });
