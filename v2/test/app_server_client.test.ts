@@ -104,6 +104,26 @@ describe("AppServerClient", () => {
     await expect(first).resolves.toEqual({ threadId: "thread_first" });
   });
 
+  it("ignores duplicate responses after the request has settled", async () => {
+    const sent: string[] = [];
+    let nextId = 1;
+    const client = new AppServerClient({
+      writeLine: (line) => sent.push(line),
+      createRequestId: () => String(nextId++),
+    });
+
+    const request = client.threadStart({ prompt: "hello" });
+
+    client.handleLine('{"id":"1","result":{"threadId":"thread_123"}}');
+
+    await expect(request).resolves.toEqual({ threadId: "thread_123" });
+    expect(getPendingRequestCount(client)).toBe(0);
+
+    client.handleLine('{"id":"1","error":{"code":500,"message":"duplicate"}}');
+    expect(getPendingRequestCount(client)).toBe(0);
+    expect(sent).toHaveLength(1);
+  });
+
   it("stops delivering notifications after unsubscribe", () => {
     const notifications: AppServerNotification[] = [];
     const client = new AppServerClient({
