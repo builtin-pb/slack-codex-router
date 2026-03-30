@@ -1151,6 +1151,39 @@ describe("RouterService", () => {
     ).rejects.toThrow("This Slack thread is not waiting for a choice.");
   });
 
+  it("rejects stale choice submissions until the Slack thread refreshes its Codex session", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const turnStart = vi.fn();
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    await expect(
+      service.submitChoice("U123", "C08TEMPLATE", "1710000000.0001", "approve"),
+    ).rejects.toThrow("This Slack thread needs a new message to refresh the Codex session.");
+
+    expect(turnStart).not.toHaveBeenCalled();
+  });
+
   it("rejects interrupt when the thread is no longer running", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
@@ -1181,5 +1214,39 @@ describe("RouterService", () => {
       service.interruptThread("U123", "C08TEMPLATE", "1710000000.0001"),
     ).rejects.toThrow("This Slack thread is not running an interruptible turn.");
     expect(turnInterrupt).not.toHaveBeenCalled();
+  });
+
+  it("rejects review requests for stale idle sessions until a new message rebinds the App Server thread", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const reviewStart = vi.fn();
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart: vi.fn(),
+      reviewStart,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "idle",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    await expect(
+      service.startReview("U123", "C08TEMPLATE", "1710000000.0001"),
+    ).rejects.toThrow("This Slack thread needs a new message to refresh the Codex session.");
+
+    expect(reviewStart).not.toHaveBeenCalled();
   });
 });
