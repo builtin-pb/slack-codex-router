@@ -499,7 +499,8 @@ Observed: `npm --prefix v2 test -- test/store.test.ts` passed (`2 tests`), and `
 Run: `npm --prefix v2 test -- v2/test/store.test.ts`  
 Expected: `1 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
+Observed: Committed the Task 2 implementation as `87b63ca` with message `feat: add v2 persistence schema`.
 
 ```bash
 git add v2/src/domain/types.ts v2/src/persistence/schema.ts v2/src/persistence/store.ts v2/test/store.test.ts
