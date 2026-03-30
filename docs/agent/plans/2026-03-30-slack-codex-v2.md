@@ -505,7 +505,7 @@ Run: `npm --prefix v2 test -- v2/test/store.test.ts`
 Expected: `3 passed`
 
 - [x] **Step 5: Commit**
-Observed: Created the initial Task 2 implementation commit `87b63ca` with message `feat: add v2 persistence schema`; later hardening landed in `6b555c5` (`fix: harden v2 persistence identity`) and the plan-audit correction landed in `4e71314` (`docs: record task 2 completion`), so this step reflects the implementation history rather than only the first checkpoint.
+Observed: Created the initial Task 2 implementation commit `87b63ca` with message `feat: add v2 persistence schema`; later hardening and plan-audit corrections landed in follow-up commits, so this step should be read as the first Task 2 checkpoint rather than the entire Task 2 history.
 
 ```bash
 git add v2/src/domain/types.ts v2/src/persistence/schema.ts v2/src/persistence/store.ts v2/test/store.test.ts
