@@ -112,7 +112,11 @@ export function registerThreadControlActions(
   app.action("confirm_merge_to_main", async ({ ack, action, body, respond }) => {
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
+      const rawSelection = action?.value?.trim();
       const expectedSelection = parseMergeSelection(action);
+      if (rawSelection && !expectedSelection) {
+        throw new Error("Malformed merge confirmation.");
+      }
       return router.confirmMergeToMain(userId, channelId, threadTs, expectedSelection);
     });
   });

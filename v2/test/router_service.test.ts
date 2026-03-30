@@ -97,6 +97,62 @@ describe("RouterService", () => {
     expect(replies).toEqual(["Started Codex task for project `template`."]);
   });
 
+  it("persists the initial thread mapping before the first turn resolves", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_abc" });
+    let resolveTurnStart: ((value: Record<string, unknown>) => void) | undefined;
+    const turnStart = vi.fn().mockImplementation(
+      () =>
+        new Promise<Record<string, unknown>>((resolve) => {
+          resolveTurnStart = resolve;
+        }),
+    );
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+    });
+
+    const handleMessage = service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0001",
+      threadTs: "1710000000.0001",
+      text: "Investigate the failing tests",
+      userId: "U123",
+      reply: vi.fn(),
+    });
+
+    for (let attempt = 0; attempt < 5 && turnStart.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(turnStart).toHaveBeenCalledTimes(1);
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      appServerThreadId: "thread_abc",
+      activeTurnId: null,
+      state: "running",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    resolveTurnStart?.({ turnId: "turn_abc" });
+    await handleMessage;
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
+      state: "running",
+    });
+  });
+
   it("resumes a stored App Server thread for Slack replies in an existing thread", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
@@ -147,6 +203,70 @@ describe("RouterService", () => {
       "turn_resume",
     );
     expect(replies).toEqual(["Continuing Codex task for project `template`."]);
+  });
+
+  it("marks an existing thread as running before a resumed turn resolves", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    let resolveTurnStart: ((value: Record<string, unknown>) => void) | undefined;
+    const turnStart = vi.fn().mockImplementation(
+      () =>
+        new Promise<Record<string, unknown>>((resolve) => {
+          resolveTurnStart = resolve;
+        }),
+    );
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_old",
+      state: "idle",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart,
+    });
+
+    const handleMessage = service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0002",
+      threadTs: "1710000000.0001",
+      text: "Use the narrower repro",
+      userId: "U123",
+      reply: vi.fn(),
+    });
+
+    for (let attempt = 0; attempt < 5 && turnStart.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(turnStart).toHaveBeenCalledTimes(1);
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      state: "running",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    resolveTurnStart?.({ turnId: "turn_resume" });
+    await handleMessage;
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      activeTurnId: "turn_resume",
+      state: "running",
+    });
   });
 
   it("rejects follow-up Slack messages while a turn is already running", async () => {
@@ -566,7 +686,7 @@ describe("RouterService", () => {
     expect(getRepositoryStatus).not.toHaveBeenCalled();
   });
 
-  it("confirms merge to main for a clean idle thread and updates the stored branch", async () => {
+  it("confirms merge to main for a clean idle thread and moves the thread back to the merged base branch", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
     const store = new RouterStore(":memory:");
@@ -619,11 +739,68 @@ describe("RouterService", () => {
       targetBranch: "main",
     });
     expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      worktreePath: fixture.projectDir,
       branchName: "main",
       baseBranch: "main",
       state: "idle",
       activeTurnId: null,
     });
+  });
+
+  it("rejects replayed merge confirmations after a successful merge updates the stored branch pair", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const threadWorktreePath = join(
+      fixture.projectDir,
+      ".codex-worktrees",
+      "1710000000-0001",
+    );
+    const getRepositoryStatus = vi.fn().mockResolvedValue({
+      repositoryName: "template",
+      sourceBranch: "codex/slack/1710000000-0001",
+      targetBranch: "main",
+      worktreeStatus: "clean",
+      checksStatus: "not run",
+    });
+    const executeMergeToMain = vi.fn().mockResolvedValue({
+      text: "Merged codex/slack/1710000000-0001 into main.",
+    });
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart: vi.fn(),
+      getRepositoryStatus,
+      executeMergeToMain,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      state: "idle",
+      worktreePath: threadWorktreePath,
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+
+    await service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0001", {
+      sourceBranch: "codex/slack/1710000000-0001",
+      targetBranch: "main",
+    });
+
+    await expect(
+      service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0001", {
+        sourceBranch: "codex/slack/1710000000-0001",
+        targetBranch: "main",
+      }),
+    ).rejects.toThrow("Merge confirmation is stale. Request a fresh merge preview.");
+
+    expect(executeMergeToMain).toHaveBeenCalledTimes(1);
   });
 
   it("rejects merge confirmation when the worktree is dirty", async () => {
@@ -663,6 +840,71 @@ describe("RouterService", () => {
     await expect(
       service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0001"),
     ).rejects.toThrow("This Slack thread has uncommitted changes and cannot be merged.");
+    expect(executeMergeToMain).not.toHaveBeenCalled();
+  });
+
+  it("rejects merge confirmation when the repository root checkout is dirty", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const threadWorktreePath = join(
+      fixture.projectDir,
+      ".codex-worktrees",
+      "1710000000-0001",
+    );
+    const getRepositoryStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repositoryName: "template",
+        sourceBranch: "codex/slack/1710000000-0001",
+        targetBranch: "main",
+        worktreeStatus: "clean",
+        checksStatus: "not run",
+      })
+      .mockResolvedValueOnce({
+        repositoryName: "template",
+        sourceBranch: "codex/slack/1710000000-0001",
+        targetBranch: "main",
+        worktreeStatus: "dirty",
+        checksStatus: "not run",
+      });
+    const executeMergeToMain = vi.fn();
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart: vi.fn(),
+      getRepositoryStatus,
+      executeMergeToMain,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      state: "idle",
+      worktreePath: threadWorktreePath,
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+
+    await expect(
+      service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0001"),
+    ).rejects.toThrow("The repository root checkout has uncommitted changes and cannot be merged.");
+
+    expect(getRepositoryStatus).toHaveBeenNthCalledWith(1, {
+      repoPath: threadWorktreePath,
+      sourceBranch: "codex/slack/1710000000-0001",
+      targetBranch: "main",
+    });
+    expect(getRepositoryStatus).toHaveBeenNthCalledWith(2, {
+      repoPath: fixture.projectDir,
+      sourceBranch: "codex/slack/1710000000-0001",
+      targetBranch: "main",
+    });
     expect(executeMergeToMain).not.toHaveBeenCalled();
   });
 

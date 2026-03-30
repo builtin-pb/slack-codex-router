@@ -52,4 +52,13 @@ describe("loadConfig", () => {
       "My Project",
     ]);
   });
+
+  it("fails fast when the app-server command is blank", () => {
+    expect(() =>
+      loadConfig({
+        ...baseEnv,
+        CODEX_APP_SERVER_COMMAND: "   ",
+      }),
+    ).toThrow("CODEX_APP_SERVER_COMMAND must include an executable");
+  });
 });

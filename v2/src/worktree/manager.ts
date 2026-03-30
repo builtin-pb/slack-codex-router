@@ -29,17 +29,23 @@ export class WorktreeManager {
     const worktreePath = buildWorktreePath(input.repoPath, input.slackThreadTs);
 
     if (!this.pathExists(worktreePath)) {
-      await this.run({
-        args: [
-          "worktree",
-          "add",
-          "-b",
-          branchName,
-          worktreePath,
-          input.baseBranch,
-        ],
-        cwd: input.repoPath,
-      });
+      try {
+        await this.run({
+          args: [
+            "worktree",
+            "add",
+            "-b",
+            branchName,
+            worktreePath,
+            input.baseBranch,
+          ],
+          cwd: input.repoPath,
+        });
+      } catch (error) {
+        if (!this.pathExists(worktreePath)) {
+          throw error;
+        }
+      }
     }
 
     return {

@@ -395,6 +395,53 @@ describe("registerSlackMessageHandler actions", () => {
     });
   });
 
+  it("rejects malformed merge confirmations before reaching the router", async () => {
+    const actionHandlers = new Map<string, (args: ActionListenerArgs) => Promise<void>>();
+    const confirmMergeToMain = vi.fn();
+
+    registerSlackMessageHandler(
+      {
+        event: vi.fn(),
+        action(matcher, listener) {
+          if (typeof matcher === "string") {
+            actionHandlers.set(matcher, listener as (args: ActionListenerArgs) => Promise<void>);
+          }
+        },
+      },
+      {
+        handleSlackMessage: vi.fn(),
+        interruptThread: vi.fn(),
+        submitChoice: vi.fn(),
+        startReview: vi.fn(),
+        restartRouter: vi.fn(),
+        mergeToMain: vi.fn(),
+        confirmMergeToMain,
+        getThreadStatus: vi.fn(),
+      } as unknown as RouterService,
+    );
+
+    const ack = vi.fn().mockResolvedValue(undefined);
+    const respond = vi.fn().mockResolvedValue(undefined);
+
+    await actionHandlers.get("confirm_merge_to_main")?.({
+      action: { action_id: "confirm_merge_to_main", value: "feature:" },
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack,
+      respond,
+    });
+
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(confirmMergeToMain).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      text: "Malformed merge confirmation.",
+      replace_original: false,
+    });
+  });
+
   it("rejects interactive actions from unauthorized users", async () => {
     const actionHandlers = new Map<string, (args: ActionListenerArgs) => Promise<void>>();
 

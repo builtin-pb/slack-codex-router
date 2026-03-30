@@ -146,5 +146,9 @@ function parseCommand(command: string): string[] {
     args.push(current);
   }
 
+  if (args.length === 0) {
+    throw new Error("CODEX_APP_SERVER_COMMAND must include an executable");
+  }
+
   return args;
 }

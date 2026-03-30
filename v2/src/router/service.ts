@@ -124,15 +124,28 @@ export class RouterService {
         return;
       }
 
-      const turn = await this.options.turnStart({
-        cwd: existingThread.worktreePath,
-        prompt,
-        threadId: existingThread.appServerThreadId,
-      });
-      this.options.store.upsertThread({
+      const provisionalThread = {
         ...existingThread,
+        activeTurnId: null,
+        state: "running" as const,
+      };
+      this.options.store.upsertThread(provisionalThread);
+
+      let turn: Record<string, unknown>;
+      try {
+        turn = await this.options.turnStart({
+          cwd: existingThread.worktreePath,
+          prompt,
+          threadId: existingThread.appServerThreadId,
+        });
+      } catch (error) {
+        this.options.store.upsertThread(existingThread);
+        throw error;
+      }
+
+      this.options.store.upsertThread({
+        ...provisionalThread,
         activeTurnId: readTurnId(turn),
-        state: "running",
       });
       await input.reply(renderContinuedTask(project.name));
       return;
@@ -159,6 +172,7 @@ export class RouterService {
       startedThread.threadId,
       worktree,
     );
+    this.options.store.upsertThread(baseThreadRecord);
     let turn: Record<string, unknown>;
 
     try {
@@ -390,17 +404,33 @@ export class RouterService {
       throw new Error("This Slack thread has uncommitted changes and cannot be merged.");
     }
 
+    const mergedRepoPath = deriveRepositoryPath(thread.worktreePath);
+    if (mergedRepoPath !== thread.worktreePath) {
+      const rootStatus = await this.options.getRepositoryStatus({
+        repoPath: mergedRepoPath,
+        sourceBranch: thread.branchName,
+        targetBranch: thread.baseBranch,
+      });
+
+      if (rootStatus.worktreeStatus !== "clean") {
+        throw new Error(
+          "The repository root checkout has uncommitted changes and cannot be merged.",
+        );
+      }
+    }
+
     const result = await this.options.executeMergeToMain({
-      repoPath: deriveRepositoryPath(thread.worktreePath),
+      repoPath: mergedRepoPath,
       sourceBranch: thread.branchName,
       targetBranch: thread.baseBranch,
     });
 
     this.options.store.upsertThread({
       ...thread,
+      worktreePath: mergedRepoPath,
+      branchName: thread.baseBranch,
       activeTurnId: null,
       state: "idle",
-      branchName: thread.baseBranch,
     });
 
     return result;

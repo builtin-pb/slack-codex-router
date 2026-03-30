@@ -45,4 +45,29 @@ describe("WorktreeManager", () => {
       cwd: "/repo/project",
     });
   });
+
+  it("treats an already-created worktree as success when another caller wins the race", async () => {
+    let exists = false;
+    const run = vi.fn().mockImplementation(async () => {
+      exists = true;
+      throw new Error("fatal: '.codex-worktrees/1710000000-0001' already exists");
+    });
+    const manager = new WorktreeManager({
+      pathExists: () => exists,
+      run,
+    });
+
+    await expect(
+      manager.ensureThreadWorktree({
+        repoPath: "/repo/project",
+        slackThreadTs: "1710000000.0001",
+        baseBranch: "main",
+      }),
+    ).resolves.toEqual({
+      worktreePath: "/repo/project/.codex-worktrees/1710000000-0001",
+      branchName: "codex/slack/1710000000-0001",
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
 });
