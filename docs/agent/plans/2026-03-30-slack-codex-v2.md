@@ -607,7 +607,8 @@ git commit -m "feat: add router v2 launcher"
 - Create: `v2/src/app_server/events.ts`
 - Create: `v2/test/app_server_client.test.ts`
 
-- [ ] **Step 1: Write the failing App Server client test**
+- [x] **Step 1: Write the failing App Server client test**
+Observed: Added `v2/test/app_server_client.test.ts` first, covering the narrow client API only: `initialize`, `threadStart`, `turnStart`, `turnSteer`, `turnInterrupt`, request-id correlation, notification emission, and server error propagation.
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -631,12 +632,14 @@ describe("AppServerClient", () => {
 });
 ```
 
-- [ ] **Step 2: Run the App Server client test**
+- [x] **Step 2: Run the App Server client test**
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` failed in the expected red state with `Cannot find module '../src/app_server/client.js'` because the new App Server files did not exist yet.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
 Expected: fail because the client and event parser do not exist.
 
-- [ ] **Step 3: Implement the stdio client**
+- [x] **Step 3: Implement the stdio client**
+Observed: Added `v2/src/app_server/events.ts`, `v2/src/app_server/client.ts`, and `v2/src/app_server/process.ts`. The implementation stays narrow: a typed notification parser and subscription stream, JSON line request/response correlation with minimal App Server methods, and a thin stdio spawn wrapper for later tasks to attach to.
 
 ```ts
 export type AppServerNotification =
@@ -654,7 +657,8 @@ export class AppServerClient {
 }
 ```
 
-- [ ] **Step 4: Run the App Server client test**
+- [x] **Step 4: Run the App Server client test**
+Observed: `npm --prefix /Users/builtin.pb/Desktop/Template/v2 test -- /Users/builtin.pb/Desktop/Template/v2/test/app_server_client.test.ts` passed (`1 passed`, `2 passed` tests after extending the contract), and `npm --prefix /Users/builtin.pb/Desktop/Template/v2 run build` then succeeded after tightening the `events.ts` type guards for strict TypeScript compilation.
 
 Run: `npm --prefix v2 test -- v2/test/app_server_client.test.ts`  
 Expected: `1 passed`
