@@ -457,6 +457,11 @@ Expected: fail because `RouterStore` and schema tables do not exist yet.
 Observed: Added `v2/src/domain/types.ts`, `v2/src/persistence/schema.ts`, and `v2/src/persistence/store.ts` with SQLite-backed `threads`, `slack_messages`, `interactive_prompts`, and `restart_intents` tables keyed by `(slack_channel_id, slack_thread_ts)` plus `RouterStore` methods for composite lookup, recovery listing, restart-intent lifecycle, and explicit close support.
 
 ```ts
+export type SlackThreadIdentity = {
+  slackChannelId: string;
+  slackThreadTs: string;
+};
+
 export type ThreadRecord = {
   slackChannelId: string;
   slackThreadTs: string;
@@ -467,8 +472,7 @@ export type ThreadRecord = {
   baseBranch: string;
 };
 
-export type RestartIntent = {
-  requestedByThreadTs: string;
+export type RestartIntent = SlackThreadIdentity & {
   requestedAt: string;
 };
 
@@ -485,11 +489,12 @@ CREATE TABLE IF NOT EXISTS restart_intents (...);
 // store.ts
 export class RouterStore {
   upsertThread(record: ThreadRecord): void { /* insert or update */ }
-  getThread(slackThreadTs: string): ThreadRecord | null { /* select */ }
+  getThread(slackChannelId: string, slackThreadTs: string): ThreadRecord | null { /* select */ }
   listRecoverableThreads(): ThreadRecord[] { /* select active */ }
   recordRestartIntent(intent: RestartIntent): void { /* insert */ }
   getPendingRestartIntent(): RestartIntent | null { /* select latest */ }
   clearRestartIntent(): void { /* delete */ }
+  close(): void { /* close the database */ }
 }
 ```
 
@@ -500,7 +505,7 @@ Run: `npm --prefix v2 test -- v2/test/store.test.ts`
 Expected: `3 passed`
 
 - [x] **Step 5: Commit**
-Observed: Committed the Task 2 implementation as `87b63ca` with message `feat: add v2 persistence schema`.
+Observed: Created the initial Task 2 implementation commit `87b63ca` with message `feat: add v2 persistence schema`; later hardening landed in `6b555c5` (`fix: harden v2 persistence identity`) and the plan-audit correction landed in `4e71314` (`docs: record task 2 completion`), so this step reflects the implementation history rather than only the first checkpoint.
 
 ```bash
 git add v2/src/domain/types.ts v2/src/persistence/schema.ts v2/src/persistence/store.ts v2/test/store.test.ts
