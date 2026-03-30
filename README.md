@@ -26,15 +26,6 @@ Relative paths are supported:
 - `SCR_PROJECTS_FILE`, `SCR_STATE_DB`, and `SCR_LOG_DIR` resolve relative to the repo root when started by the wrapper.
 - Project `path` entries in `config/projects.yaml` resolve relative to that YAML file.
 
-Slack app requirements:
-
-- Enable Socket Mode and create an app-level token with `connections:write`.
-- Add bot token scopes `chat:write`, `groups:history`, and `files:read`.
-- Subscribe to the bot event `message.groups`.
-- Reinstall the app after changing scopes.
-
-If attached images download as HTML instead of image bytes, the app is usually missing `files:read` or has not been reinstalled after that scope was added.
-
 ## Run
 
 Start or restart the service in one command:
