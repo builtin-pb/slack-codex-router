@@ -102,15 +102,15 @@ export class RouterService {
       cwd: project.path,
     });
 
+    this.options.store.upsertThread(
+      buildThreadRecord(input.channelId, input.threadTs, startedThread.threadId, project.path),
+    );
+
     await this.options.turnStart({
       cwd: project.path,
       prompt,
       threadId: startedThread.threadId,
     });
-
-    this.options.store.upsertThread(
-      buildThreadRecord(input.channelId, input.threadTs, startedThread.threadId, project.path),
-    );
     await input.reply(renderStartedTask(project.name));
   }
 }
