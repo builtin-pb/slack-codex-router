@@ -28,7 +28,7 @@ function emitHappyPathNotifications() {
     method: "item/completed",
     params: {
       threadId,
-      item: { type: "message", role: "assistant", text: "Working on it." },
+      item: { type: "agentMessage", text: "Working on it.", phase: "commentary" },
     },
   });
 }
@@ -66,7 +66,7 @@ rl.on("line", (line) => {
         method: "item/completed",
         params: {
           threadId,
-          item: { type: "message", role: "assistant", text: "Working on it." },
+          item: { type: "agentMessage", text: "Working on it.", phase: "commentary" },
         },
       });
       return;
@@ -83,7 +83,11 @@ rl.on("line", (line) => {
             method: "item/completed",
             params: {
               threadId,
-              item: { type: "message", role: "assistant", text: "Working on it." },
+              item: {
+                type: "agentMessage",
+                text: "Working on it.",
+                phase: "commentary",
+              },
             },
           })}\n`,
       );

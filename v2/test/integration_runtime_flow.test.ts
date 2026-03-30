@@ -21,7 +21,7 @@ describe("integrated runtime flow", () => {
         method: "item/completed",
         params: {
           threadId: "thread_abc",
-          item: { type: "message", role: "assistant", text: "Working on it." },
+          item: { type: "agentMessage", text: "Working on it.", phase: "commentary" },
         },
       });
 

@@ -184,7 +184,11 @@ function readNestedText(value: unknown): string | null {
 }
 
 function readAssistantMessageText(item: Record<string, unknown>): string | null {
-  if (item.type !== "message" || item.role !== "assistant") {
+  const isLegacyAssistantMessage =
+    item.type === "message" && item.role === "assistant";
+  const isCurrentAgentMessage = item.type === "agentMessage";
+
+  if (!isLegacyAssistantMessage && !isCurrentAgentMessage) {
     return null;
   }
 

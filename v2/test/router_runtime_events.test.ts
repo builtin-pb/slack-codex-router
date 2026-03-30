@@ -134,6 +134,70 @@ describe("startRouterRuntime event bridge", () => {
     expect(harness.upsertThread).not.toHaveBeenCalled();
   });
 
+  it("posts completed agentMessage items from the current app-server protocol", async () => {
+    const harness = makeRuntimeHarness();
+
+    await startRouterRuntime({
+      config: {
+        slackBotToken: "xoxb-test",
+        slackAppToken: "xapp-test",
+        allowedUserId: "U123",
+        projectsFile: "/repo/config/projects.yaml",
+        routerStateDb: "/repo/logs/router-v2.sqlite3",
+        appServerCommand: ["codex", "app-server"],
+      },
+      store: harness.store,
+      appServerProcess: {
+        writeLine: vi.fn(),
+        onLine: vi.fn().mockReturnValue(() => {}),
+        waitForExit: vi.fn().mockResolvedValue(0),
+      },
+      appServerClient: harness.appServerClient,
+      slackApp: harness.slackApp,
+      routerService: {},
+      registerSlackMessageHandler: harness.registerSlackMessageHandler,
+    });
+    harness.upsertThread.mockClear();
+
+    harness.notifications[0]?.({
+      method: "item/completed",
+      params: {
+        threadId: "thread_abc",
+        item: {
+          type: "agentMessage",
+          text: "Yes.",
+          phase: "final_answer",
+        },
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(harness.postMessage).toHaveBeenCalledWith({
+      channel: "C123",
+      text: "Yes.",
+      thread_ts: "1710000000.0001",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "Yes.",
+          },
+        },
+        {
+          type: "actions",
+          elements: expect.arrayContaining([
+            expect.objectContaining({ action_id: "status" }),
+            expect.objectContaining({ action_id: "restart_router" }),
+            expect.objectContaining({ action_id: "archive_task" }),
+          ]),
+        },
+      ],
+    });
+    expect(harness.upsertThread).not.toHaveBeenCalled();
+  });
+
   it("persists thread-scoped status changes by app server thread id", async () => {
     const harness = makeRuntimeHarness();
 

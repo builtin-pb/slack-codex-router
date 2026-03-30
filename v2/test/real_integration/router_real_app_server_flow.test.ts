@@ -78,6 +78,8 @@ describe("router runtime with a real app-server child", () => {
 
       const fragmentedTurnStart = await fragmented.waitForRequest("turn/start");
       const coalescedTurnStart = await coalesced.waitForRequest("turn/start");
+      const fragmentedSlackMessage = await fragmented.waitForSlackMessage();
+      const coalescedSlackMessage = await coalesced.waitForSlackMessage();
 
       expect(fragmentedTurnStart).toMatchObject({
         method: "turn/start",
@@ -96,6 +98,14 @@ describe("router runtime with a real app-server child", () => {
       });
       expect(coalesced.store.getThread("C08TEMPLATE", "1710000000.0003")).toMatchObject({
         activeTurnId: "turn_abc",
+      });
+      expect(fragmentedSlackMessage).toMatchObject({
+        thread_ts: "1710000000.0002",
+        text: "Working on it.",
+      });
+      expect(coalescedSlackMessage).toMatchObject({
+        thread_ts: "1710000000.0003",
+        text: "Working on it.",
       });
     } finally {
       await fragmented.cleanup();

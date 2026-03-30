@@ -241,6 +241,36 @@ describe("toRouterEventEffect", () => {
     });
   });
 
+  it("uses direct agentMessage text from the current app-server protocol", () => {
+    expect(
+      toRouterEventEffect({
+        method: "item/completed",
+        params: {
+          threadId: "thread_abc",
+          item: {
+            type: "agentMessage",
+            text: "Current protocol assistant text",
+            phase: "final_answer",
+          },
+        },
+      }),
+    ).toEqual({
+      threadId: "thread_abc",
+      message: {
+        text: "Current protocol assistant text",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "Current protocol assistant text",
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it("drops assistant messages without usable content array parts", () => {
     expect(
       toRouterEventEffect({
