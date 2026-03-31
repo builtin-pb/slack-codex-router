@@ -43,21 +43,20 @@ describe("live codex toy app scaffold", () => {
       const harness = await createLiveCodexHarness();
 
       try {
-        harness.recordSlackMessage({
-          channel: "C08TEMPLATE",
-          thread_ts: "1710000000.0500",
-          text: "Build a toy app",
+        const execution = await harness.runToyAppScenario();
+        expect(execution.worker.exitCode).toBe(0);
+        expect(execution.judge.exitCode).toBe(0);
+        expect(execution.worker.stderr).toContain("worker:");
+        expect(execution.judge.stderr).toContain("judge:");
+        expect(execution.worker.stdout).toContain("slack-message");
+        expect(execution.judge.stdout.trim()).toMatch(/^{"status":"pass"/);
+        expect(execution.objectiveChecks.passed).toBe(true);
+        expect(execution.judgeVerdict).toEqual({
+          status: "pass",
+          reasons: [],
         });
-        harness.recordAppServerRequest({
-          method: "thread/start",
-          params: { threadId: "thread_live_codex" },
-        });
-        harness.recordFileWrite("src/app.txt", "toy app ready\n");
-        harness.recordGitDiff("diff --git a/src/app.txt b/src/app.txt");
-
-        const bundle = harness.buildArtifactBundle();
-        expect(bundle.rubric).toEqual(LIVE_CODEX_TOY_APP_RUBRIC);
-        expect(bundle.transcript).toEqual(
+        expect(execution.artifactBundle.rubric).toEqual(LIVE_CODEX_TOY_APP_RUBRIC);
+        expect(execution.artifactBundle.transcript).toEqual(
           expect.arrayContaining([
             expect.objectContaining({ kind: "slack-message" }),
             expect.objectContaining({ kind: "app-server-request" }),
@@ -65,16 +64,9 @@ describe("live codex toy app scaffold", () => {
             expect.objectContaining({ kind: "git-diff" }),
           ]),
         );
+        expect(execution.serializedArtifacts).toContain("toy app ready");
         expect(harness.readWorkerPrompt()).toContain("toy app");
         expect(harness.readJudgePrompt()).toContain("strict JSON");
-
-        const execution = await harness.runToyAppScenario();
-        expect(execution.objectiveChecks.passed).toBe(true);
-        expect(execution.judgeVerdict).toEqual({
-          status: "pass",
-          reasons: [],
-        });
-        expect(execution.serializedArtifacts).toContain("toy app ready");
       } finally {
         await harness.cleanup();
       }
