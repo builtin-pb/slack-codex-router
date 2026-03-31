@@ -77,6 +77,22 @@ This layer is where the system must prove it can survive the kinds of failures u
 
 Add a documented, optional test path for running a toy scenario against a live Codex runtime when a machine is configured for it. This is useful as a realism supplement, but it must stay opt-in and clearly separated from the deterministic gate.
 
+This optional layer should support a more realistic "Codex talks to Codex through mocked Slack" scenario:
+
+- one live Codex agent acts as the worker that receives the routed task
+- the router still runs for real
+- the Slack side remains mocked and controlled by the test harness
+- a second live Codex agent can act as a judge
+
+The judge must not be a free-form oracle. It should make its pass/fail decision from captured evidence:
+
+- Slack transcript
+- router/store state snapshots
+- git diff or final filesystem state
+- explicit scenario rubric
+
+That keeps the scenario realistic without making it completely unrepeatable.
+
 ## Core Design Principles
 
 ### Determinism First
@@ -220,6 +236,33 @@ Required assertions:
 - stale flags and `activeTurnId` cleanup are applied consistently
 - recovery notices target only the latest persisted restart intent where that singleton behavior exists
 
+### 7. Optional Live-Codex Toy-App Scenario
+
+This scenario is intentionally more realistic and more expensive than the deterministic suite. It should be documented as a supplemental local-only check, not the main passing gate.
+
+Flow:
+
+1. Boot the real router with mocked Slack transport and a real temp project.
+2. Route a top-level Slack task to a live Codex worker agent rather than the scripted test agent.
+3. Let that worker complete a small toy-app task across multiple rounds through the same mocked Slack thread model used by the router.
+4. Capture the full transcript, resulting files, and git state.
+5. Dispatch a separate live Codex judge agent with a strict evaluation rubric and the captured artifacts.
+6. Treat the judge output as valid only if it references the provided evidence and returns a structured pass/fail result.
+
+Required constraints:
+
+- the scenario must be env-gated and clearly excluded from the deterministic required suite
+- the worker agent should operate through the router contract, not through direct hidden setup shortcuts
+- the judge agent should not invent its own success criteria; it must be bound to a repo-defined rubric
+- the test harness should still record objective signals such as exit status, produced files, and git diff
+
+Required assertions:
+
+- the live worker is able to complete at least one toy-app build through the router-mediated interaction path
+- the recorded artifacts are sufficient for a second agent to evaluate the outcome
+- the judge returns a structured verdict grounded in the artifact set
+- objective test harness checks and judge verdict are both surfaced in the final report
+
 ## Implementation Shape
 
 The implementation should be split into parallel lanes with disjoint write ownership.
@@ -301,6 +344,13 @@ The end-state command set should be:
 - `npm --prefix v2 run test:real-integration`
 
 If optional live-Codex smokes are added, they must use a separate clearly documented command or env-gated path.
+
+Recommended shape:
+
+- `npm --prefix v2 run test:real-integration`
+  deterministic heavy real-integration suite
+- `npm --prefix v2 run test:live-codex`
+  optional env-gated realism checks using live Codex worker and judge agents
 
 ## Verification Standard
 
