@@ -53,4 +53,17 @@ describe("router main entry", () => {
       }),
     );
   });
+
+  it("does not auto-run the bootstrap when imported as a non-main module", async () => {
+    process.argv[1] = "/tmp/not-router-entry.js";
+    process.exitCode = 7;
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await import("../src/bin/router.js");
+    await Promise.resolve();
+
+    expect(process.exitCode).toBe(7);
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
 });

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -64,15 +65,9 @@ describe("spawnAppServerProcess", () => {
         cwd: tempDir,
       });
 
-      await delay(50);
+      await once(appServer.child, "exit");
 
-      const timeout = Symbol("timeout");
-      const result = await Promise.race([
-        appServer.waitForExit(),
-        delay(200, timeout),
-      ]);
-
-      expect(result).toBe(5);
+      await expect(appServer.waitForExit()).resolves.toBe(5);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

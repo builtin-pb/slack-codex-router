@@ -2,11 +2,30 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { repoRootPath } from "../src/config.js";
 
 const startRouterRuntime = vi.fn().mockResolvedValue(undefined);
 const waitForExit = vi.fn().mockResolvedValue(0);
 const registerSlackMessageHandler = vi.fn();
 const storeClose = vi.fn();
+const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_abc" });
+const turnStart = vi.fn().mockResolvedValue({ turnId: "turn_abc" });
+const turnInterrupt = vi.fn().mockResolvedValue(undefined);
+const reviewStart = vi.fn().mockResolvedValue({ reviewId: "review_abc" });
+const requestRouterRestart = vi.fn().mockResolvedValue({
+  exitCode: 75,
+  message: "Router restart requested.",
+});
+const execFileAsync = vi.fn(async (_file: string, _args: string[], _options: { cwd: string }) => ({
+  stdout: "",
+  stderr: "",
+}));
+const execFile = Object.assign(
+  vi.fn(),
+  {
+    [Symbol.for("nodejs.util.promisify.custom")]: execFileAsync,
+  },
+);
 const spawnAppServerProcess = vi.fn(() => ({
   writeLine: vi.fn(),
   onLine: vi.fn().mockReturnValue(() => {}),
@@ -37,6 +56,10 @@ vi.mock("../src/app_server/process.js", () => ({
   spawnAppServerProcess,
 }));
 
+vi.mock("node:child_process", () => ({
+  execFile,
+}));
+
 vi.mock("../src/router/service.js", () => ({
   RouterService: routerServiceConstructor,
 }));
@@ -59,15 +82,19 @@ vi.mock("../src/app_server/client.js", () => ({
     initialize = vi.fn().mockResolvedValue(undefined);
     handleLine = vi.fn();
     failPendingRequests = vi.fn();
-    threadStart = vi.fn();
-    turnStart = vi.fn();
-    turnInterrupt = vi.fn();
-    reviewStart = vi.fn();
+    threadStart = threadStart;
+    turnStart = turnStart;
+    turnInterrupt = turnInterrupt;
+    reviewStart = reviewStart;
   },
 }));
 
 vi.mock("../src/slack/app.js", () => ({
   registerSlackMessageHandler,
+}));
+
+vi.mock("../src/runtime/restart.js", () => ({
+  requestRouterRestart,
 }));
 
 describe("router bootstrap wiring", () => {
@@ -100,6 +127,13 @@ describe("router bootstrap wiring", () => {
     routerServiceConstructor.mockClear();
     registerSlackMessageHandler.mockReset();
     storeClose.mockReset();
+    threadStart.mockClear();
+    turnStart.mockClear();
+    turnInterrupt.mockClear();
+    reviewStart.mockClear();
+    requestRouterRestart.mockClear();
+    execFile.mockClear();
+    execFileAsync.mockClear();
     vi.resetModules();
   });
 
@@ -149,6 +183,61 @@ describe("router bootstrap wiring", () => {
       projectsFile: projectsPath,
       ensureThreadWorktree: expect.any(Function),
     });
+  });
+
+  it("spawns the app server from the repo root with the parsed command and live env", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "router-bootstrap-spawn-"));
+    const dotenvPath = join(tempDir, "router.env");
+    const projectsPath = join(tempDir, "projects.yaml");
+
+    writeFileSync(
+      dotenvPath,
+      [
+        "SLACK_BOT_TOKEN=xoxb-bootstrap-test",
+        "SLACK_APP_TOKEN=xapp-bootstrap-test",
+        "SLACK_ALLOWED_USER_ID=U123",
+        `SCR_PROJECTS_FILE=${projectsPath}`,
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      projectsPath,
+      [
+        "projects:",
+        "  - channel_id: C08TEMPLATE",
+        "    name: template",
+        `    path: ${JSON.stringify(tempDir)}`,
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      for (const key of keysToClear) {
+        previousEnv.set(key, process.env[key]);
+        delete process.env[key];
+      }
+
+      process.env.DOTENV_CONFIG_PATH = dotenvPath;
+      process.env.CODEX_APP_SERVER_COMMAND =
+        "codex app-server --label 'My Project'";
+
+      const { main } = await import("../src/bin/router.js");
+      await main();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    expect(spawnAppServerProcess).toHaveBeenCalledTimes(1);
+    expect(spawnAppServerProcess.mock.calls[0]?.[0]).toEqual([
+      "codex",
+      "app-server",
+      "--label",
+      "My Project",
+    ]);
+    expect(spawnAppServerProcess.mock.calls[0]?.[1]).toMatchObject({
+      cwd: repoRootPath,
+    });
+    expect(spawnAppServerProcess.mock.calls[0]?.[1]?.env).toBe(process.env);
   });
 
   it("wires Slack control actions through the bootstrap wrapper and closes the store", async () => {
@@ -211,5 +300,112 @@ describe("router bootstrap wiring", () => {
     expect(process.exitCode).toBe(75);
     expect(exitSpy).toHaveBeenCalledWith(75);
     expect(storeClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("proxies router service delegates into the app server, git helpers, and restart handler", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "router-bootstrap-delegates-"));
+    const dotenvPath = join(tempDir, "router.env");
+    const projectsPath = join(tempDir, "projects.yaml");
+
+    writeFileSync(
+      dotenvPath,
+      [
+        "SLACK_BOT_TOKEN=xoxb-bootstrap-test",
+        "SLACK_APP_TOKEN=xapp-bootstrap-test",
+        "SLACK_ALLOWED_USER_ID=U123",
+        `SCR_PROJECTS_FILE=${projectsPath}`,
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      projectsPath,
+      [
+        "projects:",
+        "  - channel_id: C08TEMPLATE",
+        "    name: template",
+        `    path: ${JSON.stringify(tempDir)}`,
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      for (const key of keysToClear) {
+        previousEnv.set(key, process.env[key]);
+        delete process.env[key];
+      }
+
+      process.env.DOTENV_CONFIG_PATH = dotenvPath;
+
+      const { main } = await import("../src/bin/router.js");
+      await main();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    const options = routerServiceConstructor.mock.calls[0]?.[0];
+    expect(options).toBeDefined();
+
+    await options.threadStart({ cwd: "/repo/project" });
+    await options.turnStart({
+      cwd: "/repo/project",
+      prompt: "inspect this repo",
+      threadId: "thread_existing",
+    });
+    await options.turnInterrupt({
+      threadId: "thread_existing",
+      turnId: "turn_existing",
+    });
+    await options.reviewStart({
+      threadId: "thread_existing",
+      target: { type: "uncommittedChanges" },
+    });
+    await options.requestRestart({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+    });
+    await options.getRepositoryStatus({
+      repoPath: "/repo/project",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+    });
+    await options.executeMergeToMain({
+      repoPath: "/repo/project",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+    });
+
+    expect(threadStart).toHaveBeenCalledWith({ cwd: "/repo/project" });
+    expect(turnStart).toHaveBeenCalledWith({
+      cwd: "/repo/project",
+      prompt: "inspect this repo",
+      threadId: "thread_existing",
+    });
+    expect(turnInterrupt).toHaveBeenCalledWith({
+      threadId: "thread_existing",
+      turnId: "turn_existing",
+    });
+    expect(reviewStart).toHaveBeenCalledWith({
+      threadId: "thread_existing",
+      target: { type: "uncommittedChanges" },
+    });
+    expect(requestRouterRestart).toHaveBeenCalledWith({
+      store: expect.any(Object),
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+    });
+    expect(execFileAsync).toHaveBeenNthCalledWith(1, "git", ["status", "--porcelain"], {
+      cwd: "/repo/project",
+    });
+    expect(execFileAsync).toHaveBeenNthCalledWith(2, "git", ["checkout", "main"], {
+      cwd: "/repo/project",
+    });
+    expect(execFileAsync).toHaveBeenNthCalledWith(
+      3,
+      "git",
+      ["merge", "--no-ff", "--no-edit", "feature/test"],
+      {
+        cwd: "/repo/project",
+      },
+    );
   });
 });

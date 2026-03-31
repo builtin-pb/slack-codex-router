@@ -50,4 +50,75 @@ describe("RouterService registry validation", () => {
       fixture.cleanup();
     }
   });
+
+  it("fails fast when a configured project path does not exist", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "router-service-missing-path-"));
+    const missingProjectDir = join(tempDir, "missing-project");
+    const projectsFile = join(tempDir, "projects.yaml");
+    const store = new RouterStore(":memory:");
+
+    writeFileSync(
+      projectsFile,
+      [
+        "projects:",
+        "  - channel_id: C08TEMPLATE",
+        "    name: template",
+        `    path: ${JSON.stringify(missingProjectDir)}`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      expect(
+        () =>
+          new RouterService({
+            allowedUserId: "U123",
+            projectsFile,
+            store,
+            threadStart: async () => ({ threadId: "thread_abc" }),
+            turnStart: async () => ({}),
+          }),
+      ).toThrow(/does not exist/i);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails fast when a configured project path is not a directory", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "router-service-file-path-"));
+    const projectFile = join(tempDir, "project.txt");
+    const projectsFile = join(tempDir, "projects.yaml");
+    const store = new RouterStore(":memory:");
+
+    writeFileSync(projectFile, "not a directory\n", "utf8");
+    writeFileSync(
+      projectsFile,
+      [
+        "projects:",
+        "  - channel_id: C08TEMPLATE",
+        "    name: template",
+        `    path: ${JSON.stringify(projectFile)}`,
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    try {
+      expect(
+        () =>
+          new RouterService({
+            allowedUserId: "U123",
+            projectsFile,
+            store,
+            threadStart: async () => ({ threadId: "thread_abc" }),
+            turnStart: async () => ({}),
+          }),
+      ).toThrow(/not a directory/i);
+    } finally {
+      store.close();
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

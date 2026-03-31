@@ -33,14 +33,33 @@ export async function getRepositoryStatus(input: {
     args: ["status", "--porcelain"],
     cwd: input.repoPath,
   });
+  const relevantStatusLines = status.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .filter((line) => !isAdministrativeWorktreeStatus(line));
 
   return {
     repositoryName: deriveRepositoryName(input.repoPath),
     sourceBranch: input.sourceBranch ?? input.branchName ?? "",
     targetBranch: input.targetBranch,
-    worktreeStatus: status.stdout.trim() ? "dirty" : "clean",
+    worktreeStatus: relevantStatusLines.length > 0 ? "dirty" : "clean",
     checksStatus: "not run",
   };
+}
+
+function isAdministrativeWorktreeStatus(statusLine: string): boolean {
+  const statusCode = statusLine.slice(0, 2);
+  const path = statusLine.slice(3).trim();
+  if (statusCode !== "??") {
+    return false;
+  }
+
+  return (
+    path === ".codex-worktrees" ||
+    path.startsWith(".codex-worktrees/") ||
+    path.startsWith(".codex-worktrees\\")
+  );
 }
 
 function deriveRepositoryName(repoPath: string): string {

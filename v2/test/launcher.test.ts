@@ -114,6 +114,43 @@ describe("launcher main", () => {
     expect(offSpy).toHaveBeenCalledTimes(2);
   });
 
+  it("clears signal forwarding cleanly when the spawned worker emits an error", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      kill(signal: NodeJS.Signals): boolean;
+      once: EventEmitter["once"];
+    };
+    child.kill = vi.fn(() => true);
+
+    const spawn = vi.fn(() => child);
+    const buildLauncherMock = vi.fn(({ spawnWorker }: { spawnWorker(): Promise<{ wait(): Promise<number> }> }) => ({
+      runOnce: async () => {
+        const worker = await spawnWorker();
+        queueMicrotask(() => {
+          child.emit("error", new Error("worker crashed"));
+        });
+        return worker.wait();
+      },
+    }));
+
+    vi.doMock("node:child_process", () => ({
+      spawn,
+    }));
+    vi.doMock("../src/runtime/launcher.js", () => ({
+      buildLauncher: buildLauncherMock,
+    }));
+
+    const onSpy = vi.spyOn(process, "on");
+    const offSpy = vi.spyOn(process, "off");
+    const launcherModuleId = "../src/bin/launcher.js?main-child-error";
+    const { main } = await import(/* @vite-ignore */ launcherModuleId);
+
+    await expect(main()).rejects.toThrow("worker crashed");
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(onSpy).toHaveBeenCalledTimes(2);
+    expect(offSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("removes forwarded signal handlers when launcher.runOnce rejects", async () => {
     const buildLauncherMock = vi.fn(() => ({
       runOnce: vi.fn().mockRejectedValue(new Error("launcher failed")),

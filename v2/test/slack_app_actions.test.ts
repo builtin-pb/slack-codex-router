@@ -517,4 +517,109 @@ describe("registerSlackMessageHandler actions", () => {
       replace_original: false,
     });
   });
+
+  it("parses a choice from action_id when Slack omits the value field", async () => {
+    let choiceHandler:
+      | ((args: ActionListenerArgs) => Promise<void>)
+      | undefined;
+    const submitChoice = vi.fn().mockResolvedValue(undefined);
+
+    registerSlackMessageHandler(
+      {
+        event: vi.fn(),
+        action(matcher, listener) {
+          if (matcher instanceof RegExp) {
+            choiceHandler = listener as (args: ActionListenerArgs) => Promise<void>;
+          }
+        },
+      },
+      {
+        handleSlackMessage: vi.fn(),
+        interruptThread: vi.fn(),
+        submitChoice,
+        startReview: vi.fn(),
+        restartRouter: vi.fn(),
+        mergeToMain: vi.fn(),
+        confirmMergeToMain: vi.fn(),
+        getThreadStatus: vi.fn(),
+      } as unknown as RouterService,
+    );
+
+    const ack = vi.fn().mockResolvedValue(undefined);
+    const respond = vi.fn().mockResolvedValue(undefined);
+
+    await choiceHandler?.({
+      action: { action_id: "codex_choice:approve" },
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack,
+      respond,
+    });
+
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(submitChoice).toHaveBeenCalledWith(
+      "U123",
+      "C08TEMPLATE",
+      "1710000000.0001",
+      "approve",
+    );
+    expect(respond).toHaveBeenCalledWith({
+      text: "Submitted choice: approve",
+      replace_original: false,
+    });
+  });
+
+  it("still exits after sending an intentionally blank restart response", async () => {
+    const actionHandlers = new Map<string, (args: ActionListenerArgs) => Promise<void>>();
+    const requestProcessExit = vi.fn();
+
+    registerSlackMessageHandler(
+      {
+        event: vi.fn(),
+        action(matcher, listener) {
+          if (typeof matcher === "string") {
+            actionHandlers.set(matcher, listener as (args: ActionListenerArgs) => Promise<void>);
+          }
+        },
+      },
+      {
+        handleSlackMessage: vi.fn(),
+        interruptThread: vi.fn(),
+        submitChoice: vi.fn(),
+        startReview: vi.fn(),
+        restartRouter: vi.fn().mockResolvedValue({
+          exitCode: 75,
+          message: "",
+        }),
+        mergeToMain: vi.fn(),
+        confirmMergeToMain: vi.fn(),
+        getThreadStatus: vi.fn(),
+      } as unknown as RouterService,
+      { requestProcessExit },
+    );
+
+    const ack = vi.fn().mockResolvedValue(undefined);
+    const respond = vi.fn().mockResolvedValue(undefined);
+
+    await actionHandlers.get("restart_router")?.({
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack,
+      respond,
+    });
+
+    expect(ack).toHaveBeenCalledTimes(1);
+    expect(respond).toHaveBeenCalledWith({
+      text: "",
+      blocks: undefined,
+      replace_original: false,
+    });
+    expect(requestProcessExit).toHaveBeenCalledWith(75);
+  });
 });

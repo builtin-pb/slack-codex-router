@@ -35,4 +35,48 @@ describe("getRepositoryStatus", () => {
 
     expect(status.worktreeStatus).toBe("dirty");
   });
+
+  it("ignores administrative .codex-worktrees entries in repo-root status", async () => {
+    const status = await getRepositoryStatus({
+      repoPath: "/repo/template",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+      run: vi.fn().mockResolvedValue({ stdout: "?? .codex-worktrees/\n" }),
+    });
+
+    expect(status.worktreeStatus).toBe("clean");
+  });
+
+  it("still marks the repo dirty when real file changes exist beside .codex-worktrees", async () => {
+    const status = await getRepositoryStatus({
+      repoPath: "/repo/template",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+      run: vi.fn().mockResolvedValue({ stdout: "?? .codex-worktrees/\n M README.md\n" }),
+    });
+
+    expect(status.worktreeStatus).toBe("dirty");
+  });
+
+  it("does not ignore tracked changes under .codex-worktrees", async () => {
+    const status = await getRepositoryStatus({
+      repoPath: "/repo/template",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+      run: vi.fn().mockResolvedValue({ stdout: "D  .codex-worktrees/1710000000-0001/info.txt\n" }),
+    });
+
+    expect(status.worktreeStatus).toBe("dirty");
+  });
+
+  it("falls back to branchName when sourceBranch is absent", async () => {
+    const status = await getRepositoryStatus({
+      repoPath: "/repo/template",
+      branchName: "feature/from-thread",
+      targetBranch: "main",
+      run: vi.fn().mockResolvedValue({ stdout: "" }),
+    });
+
+    expect(status.sourceBranch).toBe("feature/from-thread");
+  });
 });
