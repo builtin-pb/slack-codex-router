@@ -7,7 +7,8 @@
     "dev": "tsx src/bin/router.ts",
     "test": "vitest run --config vitest.fast.config.ts",
     "coverage": "vitest run --config vitest.fast.config.ts --coverage.enabled=true --coverage.provider=v8",
-    "test:real-integration": "vitest run --config vitest.real-integration.config.ts"
+    "test:real-integration": "vitest run --config vitest.real-integration.config.ts",
+    "test:live-codex": "vitest run --config vitest.live-codex.config.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.2.0",
