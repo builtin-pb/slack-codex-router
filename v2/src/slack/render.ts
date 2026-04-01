@@ -56,14 +56,15 @@ export function renderAgentMessage(text: string): SlackRenderedMessage {
 }
 
 export function renderUserInputPrompt(input: {
-  prompt: string;
+  prompt?: string | null;
   options?: UserInputOption[];
 }): SlackRenderedMessage {
   const header = "*Codex needs your input*";
-  const promptText = `${header}\n${input.prompt}`;
+  const prompt = input.prompt?.trim() ?? "";
+  const promptText = prompt ? `${header}\n${prompt}` : header;
 
   return {
-    text: `Codex needs your input: ${input.prompt}`,
+    text: prompt ? `Codex needs your input: ${prompt}` : "Codex needs your input",
     blocks:
       input.options && input.options.length > 0
         ? buildUserInputBlocks({
@@ -85,21 +86,38 @@ export function renderUserInputPrompt(input: {
 export function withThreadControls(
   message: SlackRenderedMessage,
   threadState: ThreadState,
+  activeTurnId?: string | null,
+  appServerThreadId?: string | null,
 ): SlackRenderedMessage {
   return {
     ...message,
-    blocks: [...(message.blocks ?? []), ...buildThreadControls(toThreadControlState(threadState))],
+    blocks: [
+      ...(message.blocks ?? []),
+      ...buildThreadControls(
+        toThreadControlState(threadState, activeTurnId, appServerThreadId),
+      ),
+    ],
   };
 }
 
-function toThreadControlState(state: ThreadState): {
+function toThreadControlState(
+  state: ThreadState,
+  activeTurnId?: string | null,
+  appServerThreadId?: string | null,
+): {
   canInterrupt: boolean;
+  interruptTurnId?: string | null;
   canReview: boolean;
+  reviewThreadId?: string | null;
   canMerge: boolean;
+  mergeThreadId?: string | null;
 } {
   return {
     canInterrupt: state === "running",
+    interruptTurnId: state === "running" ? activeTurnId : null,
     canReview: state === "idle",
+    reviewThreadId: state === "idle" ? appServerThreadId : null,
     canMerge: state === "idle",
+    mergeThreadId: state === "idle" ? appServerThreadId : null,
   };
 }

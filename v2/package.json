@@ -8,7 +8,8 @@
     "test": "vitest run --config vitest.fast.config.ts",
     "coverage": "vitest run --config vitest.fast.config.ts --coverage.enabled=true --coverage.provider=v8",
     "test:real-integration": "vitest run --config vitest.real-integration.config.ts",
-    "test:live-codex": "vitest run --config vitest.live-codex.config.ts"
+    "test:live-codex": "vitest run --config vitest.live-codex.config.ts",
+    "test:live-codex:fixtures": "LIVE_CODEX_E2E=1 LIVE_CODEX_VARIANT=fresh-burst LIVE_CODEX_WORKER_CMD=\"node $(pwd)/test/fixtures/live_codex_fake_worker_fresh_burst.mjs\" LIVE_CODEX_JUDGE_CMD=\"node $(pwd)/test/fixtures/live_codex_fake_judge_fresh_burst.mjs\" vitest run --config vitest.live-codex.config.ts"
   },
   "dependencies": {
     "@slack/bolt": "^4.2.0",

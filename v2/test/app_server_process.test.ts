@@ -73,6 +73,148 @@ describe("spawnAppServerProcess", () => {
     }
   });
 
+  it("delivers the final unterminated stdout chunk after the child exits", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-final-chunk-"));
+
+    try {
+      const scriptPath = join(tempDir, "final-chunk.mjs");
+      writeFileSync(
+        scriptPath,
+        [
+          'process.stdout.write("final-without-newline");',
+          "process.exit(0);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const appServer = spawnAppServerProcess([process.execPath, scriptPath], {
+        cwd: tempDir,
+      });
+      const lines: string[] = [];
+
+      const unsubscribe = appServer.onLine((line) => {
+        lines.push(line);
+      });
+
+      try {
+        await expect(appServer.waitForExit()).resolves.toBe(0);
+        await delay(20);
+
+        expect(lines).toEqual(["final-without-newline"]);
+      } finally {
+        unsubscribe();
+        appServer.child.kill();
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not drop a final line from an inherited stdout pipe after the main child exits", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-inherited-stdout-"));
+
+    try {
+      const childPath = join(tempDir, "child.mjs");
+      const grandchildPath = join(tempDir, "grandchild.mjs");
+      writeFileSync(
+        grandchildPath,
+        [
+          "setTimeout(() => {",
+          '  process.stdout.write("late-final\\n", () => process.exit(0));',
+          "}, 50);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        childPath,
+        [
+          'import { spawn } from "node:child_process";',
+          `spawn(process.execPath, [${JSON.stringify(grandchildPath)}], {`,
+          '  stdio: ["ignore", "inherit", "inherit"],',
+          "}).unref();",
+          "process.exit(0);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const appServer = spawnAppServerProcess([process.execPath, childPath], {
+        cwd: tempDir,
+      });
+      const lines: string[] = [];
+
+      const unsubscribe = appServer.onLine((line) => {
+        lines.push(line);
+      });
+
+      try {
+        await expect(appServer.waitForExit()).resolves.toBe(0);
+        await delay(150);
+
+        expect(lines).toEqual(["late-final"]);
+      } finally {
+        unsubscribe();
+        appServer.child.kill();
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resolve waitForExit until inherited stdout is drained", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-exit-contract-"));
+
+    try {
+      const childPath = join(tempDir, "child.mjs");
+      const grandchildPath = join(tempDir, "grandchild.mjs");
+      writeFileSync(
+        grandchildPath,
+        [
+          "setTimeout(() => {",
+          '  process.stdout.write("late-final\\n", () => process.exit(0));',
+          "}, 50);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      writeFileSync(
+        childPath,
+        [
+          'import { spawn } from "node:child_process";',
+          `spawn(process.execPath, [${JSON.stringify(grandchildPath)}], {`,
+          '  stdio: ["ignore", "inherit", "inherit"],',
+          "}).unref();",
+          "process.exit(0);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const appServer = spawnAppServerProcess([process.execPath, childPath], {
+        cwd: tempDir,
+      });
+      const lines: string[] = [];
+
+      const unsubscribe = appServer.onLine((line) => {
+        lines.push(line);
+      });
+
+      try {
+        const exitCode = await appServer.waitForExit();
+
+        expect(exitCode).toBe(0);
+        expect(lines).toEqual(["late-final"]);
+      } finally {
+        unsubscribe();
+        appServer.child.kill();
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("drains stderr so a chatty child can still deliver stdout readiness", async () => {
     const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-stderr-"));
 
@@ -127,6 +269,59 @@ describe("spawnAppServerProcess", () => {
         await expect(appServer.waitForExit()).resolves.toBe(0);
       } finally {
         unsubscribe();
+        appServer.child.kill();
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects stalled stdin backpressure instead of hanging forever", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "app-server-process-stalled-stdin-"));
+
+    try {
+      const scriptPath = join(tempDir, "stalled-stdin.mjs");
+      writeFileSync(
+        scriptPath,
+        [
+          "process.stdin.pause();",
+          'process.stdout.write("ready\\n");',
+          "setTimeout(() => {}, 10_000);",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const appServer = spawnAppServerProcess([process.execPath, scriptPath], {
+        cwd: tempDir,
+        stdinWriteTimeoutMs: 50,
+      });
+
+      const ready = new Promise<void>((resolve) => {
+        const unsubscribe = appServer.onLine((line) => {
+          if (line !== "ready") {
+            return;
+          }
+
+          unsubscribe();
+          resolve();
+        });
+      });
+
+      try {
+        await ready;
+
+        const payload = "x".repeat(1024 * 1024);
+        const outcome = await Promise.race([
+          appServer.writeLine(payload).then(
+            () => "resolved",
+            (error: unknown) => (error instanceof Error ? error.message : String(error)),
+          ),
+          delay(500, "timed out"),
+        ]);
+
+        expect(outcome).toBe("App Server stdin write timed out");
+      } finally {
         appServer.child.kill();
       }
     } finally {

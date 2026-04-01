@@ -39,12 +39,15 @@ describe("RouterService retry resume", () => {
     }
   });
 
-  it("reuses the stored App Server thread on a later retry after the first turn fails", async () => {
+  it("starts a fresh App Server thread on retry after the first turn fails during setup", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
     const store = new RouterStore(":memory:");
     cleanups.push(() => store.close());
-    const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_abc" });
+    const threadStart = vi
+      .fn()
+      .mockResolvedValueOnce({ threadId: "thread_abc" })
+      .mockResolvedValueOnce({ threadId: "thread_retry" });
     const turnStart = vi
       .fn()
       .mockRejectedValueOnce(new Error("turn failed"))
@@ -92,7 +95,7 @@ describe("RouterService retry resume", () => {
       },
     });
 
-    expect(threadStart).toHaveBeenCalledTimes(1);
+    expect(threadStart).toHaveBeenCalledTimes(2);
     expect(turnStart).toHaveBeenCalledTimes(2);
     expect(turnStart).toHaveBeenNthCalledWith(1, {
       cwd: fixture.projectDir,
@@ -102,10 +105,10 @@ describe("RouterService retry resume", () => {
     expect(turnStart).toHaveBeenNthCalledWith(2, {
       cwd: fixture.projectDir,
       prompt: "Continue from the failed attempt",
-      threadId: "thread_abc",
+      threadId: "thread_retry",
     });
     expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
-      appServerThreadId: "thread_abc",
+      appServerThreadId: "thread_retry",
       activeTurnId: "turn_retry",
       state: "running",
       worktreePath: fixture.projectDir,

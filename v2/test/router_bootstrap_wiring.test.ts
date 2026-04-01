@@ -228,16 +228,21 @@ describe("router bootstrap wiring", () => {
     }
 
     expect(spawnAppServerProcess).toHaveBeenCalledTimes(1);
-    expect(spawnAppServerProcess.mock.calls[0]?.[0]).toEqual([
+    const spawnCalls = spawnAppServerProcess.mock.calls as unknown as Array<
+      [string[], { cwd?: string; env?: NodeJS.ProcessEnv }]
+    >;
+    const spawnCall = spawnCalls[0];
+    expect(spawnCall).toBeDefined();
+    expect(spawnCall[0]).toEqual([
       "codex",
       "app-server",
       "--label",
       "My Project",
     ]);
-    expect(spawnAppServerProcess.mock.calls[0]?.[1]).toMatchObject({
+    expect(spawnCall[1]).toMatchObject({
       cwd: repoRootPath,
     });
-    expect(spawnAppServerProcess.mock.calls[0]?.[1]?.env).toBe(process.env);
+    expect(spawnCall[1].env).toBe(process.env);
   });
 
   it("wires Slack control actions through the bootstrap wrapper and closes the store", async () => {
@@ -345,6 +350,13 @@ describe("router bootstrap wiring", () => {
     const options = routerServiceConstructor.mock.calls[0]?.[0];
     expect(options).toBeDefined();
 
+    execFileAsync.mockImplementation(
+      async (_file: string, args: string[], _options: { cwd: string }) => ({
+        stdout: args[0] === "branch" ? "feature/original\n" : "",
+        stderr: "",
+      }),
+    );
+
     await options.threadStart({ cwd: "/repo/project" });
     await options.turnStart({
       cwd: "/repo/project",
@@ -396,13 +408,24 @@ describe("router bootstrap wiring", () => {
     expect(execFileAsync).toHaveBeenNthCalledWith(1, "git", ["status", "--porcelain"], {
       cwd: "/repo/project",
     });
-    expect(execFileAsync).toHaveBeenNthCalledWith(2, "git", ["checkout", "main"], {
+    expect(execFileAsync).toHaveBeenNthCalledWith(2, "git", ["branch", "--show-current"], {
+      cwd: "/repo/project",
+    });
+    expect(execFileAsync).toHaveBeenNthCalledWith(3, "git", ["checkout", "main"], {
       cwd: "/repo/project",
     });
     expect(execFileAsync).toHaveBeenNthCalledWith(
-      3,
+      4,
       "git",
       ["merge", "--no-ff", "--no-edit", "feature/test"],
+      {
+        cwd: "/repo/project",
+      },
+    );
+    expect(execFileAsync).toHaveBeenNthCalledWith(
+      5,
+      "git",
+      ["checkout", "feature/original"],
       {
         cwd: "/repo/project",
       },

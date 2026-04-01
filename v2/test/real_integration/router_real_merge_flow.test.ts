@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { mergeBranchToTarget } from "../../src/git/merge_to_main.js";
@@ -79,6 +80,118 @@ describe("real merge flow", () => {
 
     expect(store.getThread("C08TEMPLATE", "1710000000.0011")).toEqual(initialRecord);
     store.close();
+  });
+
+  it("cleans up the root checkout when a real merge fails with conflicts", async () => {
+    const repo = await createGitRepoFixture();
+    const store = new RouterStore(":memory:");
+    const worktree = await repo.createWorktreeManager().ensureThreadWorktree({
+      repoPath: repo.repoPath,
+      slackThreadTs: "1710000000.0013",
+      baseBranch: repo.defaultBranch,
+    });
+
+    await repo.commitFile(repo.repoPath, "conflict.txt", "main\n", "main edit");
+    await repo.commitFile(worktree.worktreePath, "conflict.txt", "feature\n", "feature edit");
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0013",
+      appServerThreadId: "thread_merge",
+      activeTurnId: null,
+      appServerSessionStale: false,
+      state: "idle",
+      worktreePath: worktree.worktreePath,
+      branchName: worktree.branchName,
+      baseBranch: repo.defaultBranch,
+    });
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: repo.projectsFile,
+      store,
+      threadStart: async () => ({ threadId: "thread_merge" }),
+      turnStart: async () => ({ turnId: "turn_merge" }),
+      getRepositoryStatus,
+      executeMergeToMain: mergeBranchToTarget,
+    });
+
+    await expect(
+      service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0013"),
+    ).rejects.toThrow();
+
+    expect(await repo.statusPorcelain(repo.repoPath)).toBe("?? .codex-worktrees/\n");
+
+    store.close();
+    repo.cleanup();
+  });
+
+  it("restores the original root branch after a successful merge", async () => {
+    const repo = await createGitRepoFixture({ divergedBranch: "feature/restore-root-branch" });
+    await repo.createBranch(repo.repoPath, "scratch/root-context");
+    await repo.checkout(repo.repoPath, repo.defaultBranch);
+
+    const worktree = await repo.createWorktreeManager().ensureThreadWorktree({
+      repoPath: repo.repoPath,
+      slackThreadTs: "1710000000.0014",
+      baseBranch: repo.defaultBranch,
+    });
+
+    await repo.commitFile(
+      worktree.worktreePath,
+      "feature.txt",
+      "restore branch\n",
+      "feature change",
+    );
+
+    await repo.checkout(repo.repoPath, "scratch/root-context");
+    await mergeBranchToTarget({
+      repoPath: repo.repoPath,
+      sourceBranch: worktree.branchName,
+      targetBranch: repo.defaultBranch,
+    });
+
+    expect(await repo.currentBranch(repo.repoPath)).toBe("scratch/root-context");
+    expect(await repo.showFile(repo.defaultBranch, "feature.txt")).toBe("restore branch\n");
+
+    repo.cleanup();
+  });
+
+  it("restores a detached root HEAD after a successful merge", async () => {
+    const repo = await createGitRepoFixture({ divergedBranch: "feature/detached-root-head" });
+    await repo.commitFile(repo.repoPath, "main-base.txt", "main base\n", "main base commit");
+    const detachedCommit = await repo.revParse("HEAD^");
+    const worktree = await repo.createWorktreeManager().ensureThreadWorktree({
+      repoPath: repo.repoPath,
+      slackThreadTs: "1710000000.0015",
+      baseBranch: repo.defaultBranch,
+    });
+
+    await repo.commitFile(
+      worktree.worktreePath,
+      "detached.txt",
+      "detached restore\n",
+      "feature change",
+    );
+
+    execFileSync("git", ["checkout", "--detach", detachedCommit], {
+      cwd: repo.repoPath,
+      encoding: "utf8",
+    });
+    expect(await repo.currentBranch(repo.repoPath)).toBe("");
+    expect(await repo.revParse("HEAD")).toBe(detachedCommit);
+
+    await mergeBranchToTarget({
+      repoPath: repo.repoPath,
+      sourceBranch: worktree.branchName,
+      targetBranch: repo.defaultBranch,
+    });
+
+    expect(await repo.revParse("HEAD")).toBe(detachedCommit);
+    expect(await repo.currentBranch(repo.repoPath)).toBe("");
+    expect(await repo.showFile(repo.defaultBranch, "detached.txt")).toBe("detached restore\n");
+
+    repo.cleanup();
   });
 
   it("rejects dirty worktrees and dirty repo roots before allowing a real merge", async () => {

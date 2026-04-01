@@ -38,11 +38,22 @@ export async function recoverAfterRestart(input: {
     appServerSessionStale: true,
     state: thread.state === "idle" ? "idle" : "interrupted",
   }));
+  const pendingIntentMatchesRecoveredThread =
+    input.pendingRestartIntent !== null &&
+    recoveredThreads.some(
+      (thread) =>
+        thread.slackChannelId === input.pendingRestartIntent?.slackChannelId &&
+        thread.slackThreadTs === input.pendingRestartIntent?.slackThreadTs,
+    );
 
   return {
     recoveredThreadCount: recoveredThreads.length,
     recoveredThreads,
-    notifyThreadTs: input.pendingRestartIntent?.slackThreadTs ?? null,
-    notifyChannelId: input.pendingRestartIntent?.slackChannelId ?? null,
+    notifyThreadTs: pendingIntentMatchesRecoveredThread
+      ? input.pendingRestartIntent?.slackThreadTs ?? null
+      : null,
+    notifyChannelId: pendingIntentMatchesRecoveredThread
+      ? input.pendingRestartIntent?.slackChannelId ?? null
+      : null,
   };
 }

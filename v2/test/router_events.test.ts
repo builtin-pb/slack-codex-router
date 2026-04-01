@@ -86,6 +86,62 @@ describe("toRouterEventEffect", () => {
     });
   });
 
+  it("renders a fallback prompt when requestUserInput has options but no prompt text", () => {
+    expect(
+      toRouterEventEffect({
+        method: "tool/requestUserInput",
+        params: {
+          threadId: "thread_abc",
+          questions: [
+            {
+              id: "approval",
+              options: [{ label: "Approve" }, { label: "Reject" }],
+            },
+          ],
+        },
+      }),
+    ).toEqual({
+      threadId: "thread_abc",
+      state: "awaiting_user_input",
+      choiceOptions: ["Approve", "Reject"],
+      message: {
+        text: "Codex needs your input",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Codex needs your input*",
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                action_id: "codex_choice:approval-1",
+                text: {
+                  type: "plain_text",
+                  text: "Approve",
+                },
+                value: "Approve",
+              },
+              {
+                type: "button",
+                action_id: "codex_choice:approval-2",
+                text: {
+                  type: "plain_text",
+                  text: "Reject",
+                },
+                value: "Reject",
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
   it("extracts prompts and options from questions arrays", () => {
     expect(
       toRouterEventEffect({
@@ -109,6 +165,7 @@ describe("toRouterEventEffect", () => {
     ).toEqual({
       threadId: "thread_abc",
       state: "awaiting_user_input",
+      choiceOptions: ["main", "develop"],
       message: {
         text: "Codex needs your input: Repository choice\nWhich branch should we use?",
         blocks: [

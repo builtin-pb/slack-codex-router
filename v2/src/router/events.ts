@@ -10,6 +10,7 @@ export type RouterEventEffect = {
   threadId: string;
   state?: ThreadState;
   message?: SlackRenderedMessage;
+  choiceOptions?: string[];
 };
 
 export function toRouterEventEffect(
@@ -39,7 +40,10 @@ export function toRouterEventEffect(
     return {
       threadId,
       state: "awaiting_user_input",
-      message: prompt ? renderUserInputPrompt({ prompt, options }) : undefined,
+      ...(options.length > 0
+        ? { choiceOptions: options.map((option) => option.value) }
+        : {}),
+      message: renderUserInputPrompt({ prompt, options }),
     };
   }
 

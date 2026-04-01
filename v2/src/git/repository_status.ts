@@ -49,12 +49,7 @@ export async function getRepositoryStatus(input: {
 }
 
 function isAdministrativeWorktreeStatus(statusLine: string): boolean {
-  const statusCode = statusLine.slice(0, 2);
   const path = statusLine.slice(3).trim();
-  if (statusCode !== "??") {
-    return false;
-  }
-
   return (
     path === ".codex-worktrees" ||
     path.startsWith(".codex-worktrees/") ||

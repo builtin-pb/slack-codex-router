@@ -66,8 +66,17 @@ describe("integrated runtime flow", () => {
         },
       });
 
-      await harness.dispatchAction("codex_choice:approval-1", {
-        action: { action_id: "codex_choice:approval-1", value: "Approve" },
+      const choiceButton = findChoiceButton(harness.slack.postedMessages.at(-1));
+      expect(choiceButton).toMatchObject({
+        action_id: expect.stringMatching(/^codex_choice:\d+:/),
+        value: expect.stringMatching(/^\d+:/),
+      });
+
+      await harness.dispatchAction(choiceButton.action_id, {
+        action: {
+          action_id: choiceButton.action_id,
+          value: choiceButton.value,
+        },
         user: { id: "U123" },
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -82,3 +91,42 @@ describe("integrated runtime flow", () => {
     }
   });
 });
+
+function findChoiceButton(message: Record<string, unknown> | undefined): {
+  action_id: string;
+  value: string;
+} {
+  const blocks = Array.isArray(message?.blocks) ? message.blocks : [];
+
+  for (const block of blocks) {
+    if (!block || typeof block !== "object" || Array.isArray(block)) {
+      continue;
+    }
+
+    if ((block as { type?: unknown }).type !== "actions") {
+      continue;
+    }
+
+    const elements = Array.isArray((block as { elements?: unknown }).elements)
+      ? (block as { elements: unknown[] }).elements
+      : [];
+
+    for (const element of elements) {
+      if (!element || typeof element !== "object" || Array.isArray(element)) {
+        continue;
+      }
+
+      const actionId = (element as { action_id?: unknown }).action_id;
+      const value = (element as { value?: unknown }).value;
+      if (
+        typeof actionId === "string" &&
+        actionId.startsWith("codex_choice:") &&
+        typeof value === "string"
+      ) {
+        return { action_id: actionId, value };
+      }
+    }
+  }
+
+  throw new Error("Expected a rendered codex choice button in the latest Slack message.");
+}

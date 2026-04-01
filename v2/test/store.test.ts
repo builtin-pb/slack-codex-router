@@ -97,6 +97,44 @@ describe("RouterStore", () => {
     expect(store.getPendingRestartIntent()).toBeNull();
   });
 
+  it("only clears a restart intent when the stored value still matches", () => {
+    const store = new RouterStore(":memory:");
+
+    store.recordRestartIntent({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      requestedAt: "2026-03-30T12:00:00Z",
+    });
+
+    expect(
+      store.clearRestartIntentIfMatches({
+        slackChannelId: "C123",
+        slackThreadTs: "1710000000.0001",
+        requestedAt: "2026-03-30T12:00:00Z",
+      }),
+    ).toBe(true);
+    expect(store.getPendingRestartIntent()).toBeNull();
+
+    store.recordRestartIntent({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      requestedAt: "2026-03-30T12:00:00Z",
+    });
+
+    expect(
+      store.clearRestartIntentIfMatches({
+        slackChannelId: "C123",
+        slackThreadTs: "1710000000.0002",
+        requestedAt: "2026-03-30T12:00:01Z",
+      }),
+    ).toBe(false);
+    expect(store.getPendingRestartIntent()).toEqual({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      requestedAt: "2026-03-30T12:00:00Z",
+    });
+  });
+
   it("persists data across store recreation on disk", () => {
     const databaseDir = mkdtempSync(join(tmpdir(), "router-store-"));
     const databasePath = join(databaseDir, "state.sqlite3");
@@ -251,5 +289,43 @@ describe("RouterStore", () => {
     } finally {
       rmSync(databaseDir, { recursive: true, force: true });
     }
+  });
+
+  it("tracks the latest unresolved choice prompt per Slack thread", () => {
+    const store = new RouterStore(":memory:");
+
+    store.upsertThread({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
+      state: "awaiting_user_input",
+      worktreePath: "/tmp/router/wt-1",
+      branchName: "codex/slack/1710000000.0001",
+      baseBranch: "main",
+    });
+
+    const firstPromptId = store.recordChoicePrompt({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      options: ["approve", "reject"],
+    });
+    const secondPromptId = store.recordChoicePrompt({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      options: ["merge now", "revise"],
+    });
+
+    expect(firstPromptId).toBeTypeOf("number");
+    expect(secondPromptId).toBeTypeOf("number");
+
+    expect(store.getLatestChoicePrompt("C123", "1710000000.0001")).toEqual({
+      promptId: secondPromptId,
+      options: ["merge now", "revise"],
+    });
+
+    store.resolveChoicePrompts("C123", "1710000000.0001");
+
+    expect(store.getLatestChoicePrompt("C123", "1710000000.0001")).toBeNull();
   });
 });

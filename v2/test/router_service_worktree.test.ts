@@ -101,6 +101,155 @@ describe("RouterService worktree routing", () => {
     expect(replies).toEqual(["Started Codex task for project `template`."]);
   });
 
+  it("serializes concurrent first-message deliveries for the same new Slack thread", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const replies: string[] = [];
+    const threadStartGate = createDeferred<{ threadId: string }>();
+    const turnStartGate = createDeferred<Record<string, unknown>>();
+    const threadStart = vi.fn().mockReturnValue(threadStartGate.promise);
+    const turnStart = vi.fn().mockReturnValue(turnStartGate.promise);
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+      ensureThreadWorktree: vi.fn().mockResolvedValue({
+        worktreePath: join(
+          fixture.projectDir,
+          ".codex-worktrees",
+          "1710000000-0001",
+        ),
+        branchName: "codex/slack/1710000000-0001",
+      }),
+    });
+
+    const firstDispatch = service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0001",
+      threadTs: "1710000000.0001",
+      text: "Investigate the failing tests",
+      userId: "U123",
+      reply: (message) => {
+        replies.push(message);
+      },
+    });
+    const secondDispatch = service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0001",
+      threadTs: "1710000000.0001",
+      text: "Investigate the failing tests",
+      userId: "U123",
+      reply: (message) => {
+        replies.push(message);
+      },
+    });
+
+    await waitForCalls(threadStart, 1);
+    expect(turnStart).not.toHaveBeenCalled();
+
+    threadStartGate.resolve({ threadId: "thread_abc" });
+    await waitForCalls(turnStart, 1);
+
+    turnStartGate.resolve({ turnId: "turn_abc" });
+    await Promise.all([firstDispatch, secondDispatch]);
+
+    expect(threadStart).toHaveBeenCalledTimes(1);
+    expect(turnStart).toHaveBeenCalledTimes(1);
+    expect(replies).toEqual([
+      "Started Codex task for project `template`.",
+      "This Slack thread already has a running Codex turn.",
+    ]);
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toMatchObject({
+      appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
+      state: "running",
+      worktreePath: join(
+        fixture.projectDir,
+        ".codex-worktrees",
+        "1710000000-0001",
+      ),
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+  });
+
+  it("collapses a burst of duplicate first-message deliveries into one real task start", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const replies: string[] = [];
+    const threadStartGate = createDeferred<{ threadId: string }>();
+    const turnStartGate = createDeferred<Record<string, unknown>>();
+    const threadStart = vi.fn().mockReturnValue(threadStartGate.promise);
+    const turnStart = vi.fn().mockReturnValue(turnStartGate.promise);
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+      ensureThreadWorktree: vi.fn().mockResolvedValue({
+        worktreePath: join(
+          fixture.projectDir,
+          ".codex-worktrees",
+          "1710000000-0002",
+        ),
+        branchName: "codex/slack/1710000000-0002",
+      }),
+    });
+
+    const dispatches = Array.from({ length: 5 }, () =>
+      service.handleSlackMessage({
+        channelId: "C08TEMPLATE",
+        messageTs: "1710000000.0002",
+        threadTs: "1710000000.0002",
+        text: "Investigate the failing tests",
+        userId: "U123",
+        reply: (message) => {
+          replies.push(message);
+        },
+      }),
+    );
+
+    await waitForCalls(threadStart, 1);
+    expect(turnStart).not.toHaveBeenCalled();
+
+    threadStartGate.resolve({ threadId: "thread_abc" });
+    await waitForCalls(turnStart, 1);
+
+    turnStartGate.resolve({ turnId: "turn_abc" });
+    await Promise.all(dispatches);
+
+    expect(threadStart).toHaveBeenCalledTimes(1);
+    expect(turnStart).toHaveBeenCalledTimes(1);
+    expect(replies).toEqual([
+      "Started Codex task for project `template`.",
+      "This Slack thread already has a running Codex turn.",
+      "This Slack thread already has a running Codex turn.",
+      "This Slack thread already has a running Codex turn.",
+      "This Slack thread already has a running Codex turn.",
+    ]);
+    expect(store.getThread("C08TEMPLATE", "1710000000.0002")).toMatchObject({
+      appServerThreadId: "thread_abc",
+      activeTurnId: "turn_abc",
+      state: "running",
+      worktreePath: join(
+        fixture.projectDir,
+        ".codex-worktrees",
+        "1710000000-0002",
+      ),
+      branchName: "codex/slack/1710000000-0002",
+      baseBranch: "main",
+    });
+  });
+
   it("reuses the stored worktree path and branch metadata when continuing a thread", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);
@@ -256,4 +405,115 @@ describe("RouterService worktree routing", () => {
       baseBranch: "main",
     });
   });
+
+  it("recreates a missing worktree before retrying a failed_setup thread", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    const missingWorktreePath = join(
+      fixture.projectDir,
+      ".codex-worktrees",
+      "1710000000-0004",
+    );
+    const recreatedWorktreePath = join(
+      fixture.projectDir,
+      ".codex-worktrees",
+      "1710000000-0004-recreated",
+    );
+    const ensureThreadWorktree = vi.fn().mockResolvedValue({
+      worktreePath: recreatedWorktreePath,
+      branchName: "codex/slack/1710000000-0004-recreated",
+    });
+    const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_retry" });
+    const turnStart = vi.fn().mockResolvedValue({ turnId: "turn_retry" });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0004",
+      appServerThreadId: "thread_old",
+      activeTurnId: null,
+      appServerSessionStale: false,
+      state: "failed_setup",
+      worktreePath: missingWorktreePath,
+      branchName: "codex/slack/1710000000-0004",
+      baseBranch: "main",
+    });
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+      ensureThreadWorktree,
+    });
+
+    await service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0005",
+      threadTs: "1710000000.0004",
+      text: "continue",
+      userId: "U123",
+      reply: vi.fn(),
+    });
+
+    expect(ensureThreadWorktree).toHaveBeenCalledWith({
+      repoPath: fixture.projectDir,
+      slackThreadTs: "1710000000.0004",
+      baseBranch: "main",
+    });
+    expect(threadStart).toHaveBeenCalledWith({
+      cwd: recreatedWorktreePath,
+    });
+    expect(turnStart).toHaveBeenCalledWith({
+      cwd: recreatedWorktreePath,
+      prompt: "continue",
+      threadId: "thread_retry",
+    });
+    expect(store.getThread("C08TEMPLATE", "1710000000.0004")).toMatchObject({
+      appServerThreadId: "thread_retry",
+      activeTurnId: "turn_retry",
+      appServerSessionStale: false,
+      state: "running",
+      worktreePath: recreatedWorktreePath,
+      branchName: "codex/slack/1710000000-0004-recreated",
+      baseBranch: "main",
+    });
+  });
 });
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    resolve,
+    reject,
+  };
+}
+
+async function waitForCalls<T extends (...args: never[]) => unknown>(
+  spy: ReturnType<typeof vi.fn<T>>,
+  expectedCalls: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    if (spy.mock.calls.length === expectedCalls) {
+      return;
+    }
+
+    if (spy.mock.calls.length > expectedCalls) {
+      break;
+    }
+
+    await Promise.resolve();
+  }
+
+  expect(spy).toHaveBeenCalledTimes(expectedCalls);
+}

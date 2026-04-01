@@ -150,6 +150,7 @@ describe("registerSlackMessageHandler actions", () => {
     const interruptAck = vi.fn().mockResolvedValue(undefined);
     const interruptRespond = vi.fn().mockResolvedValue(undefined);
     await actionHandlers.get("interrupt")?.({
+      action: { action_id: "interrupt", value: "interrupt:turn_abc" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -162,6 +163,7 @@ describe("registerSlackMessageHandler actions", () => {
     const reviewAck = vi.fn().mockResolvedValue(undefined);
     const reviewRespond = vi.fn().mockResolvedValue(undefined);
     await actionHandlers.get("review")?.({
+      action: { action_id: "review", value: "review:thread_abc" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -186,6 +188,7 @@ describe("registerSlackMessageHandler actions", () => {
     const mergeAck = vi.fn().mockResolvedValue(undefined);
     const mergeRespond = vi.fn().mockResolvedValue(undefined);
     await actionHandlers.get("merge_to_main")?.({
+      action: { action_id: "merge_to_main", value: "merge_to_main:thread_abc" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -247,7 +250,7 @@ describe("registerSlackMessageHandler actions", () => {
     const choiceAck = vi.fn().mockResolvedValue(undefined);
     const choiceRespond = vi.fn().mockResolvedValue(undefined);
     await choiceHandler?.({
-      action: { action_id: "codex_choice:approve", value: "approve" },
+      action: { action_id: "codex_choice:17:approve", value: "17:approve" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -280,6 +283,7 @@ describe("registerSlackMessageHandler actions", () => {
       "U123",
       "C08TEMPLATE",
       "1710000000.0001",
+      "turn_abc",
     );
     expect(interruptAck).toHaveBeenCalledTimes(1);
     expect(interruptRespond).toHaveBeenCalledWith({
@@ -291,6 +295,7 @@ describe("registerSlackMessageHandler actions", () => {
       "U123",
       "C08TEMPLATE",
       "1710000000.0001",
+      "thread_abc",
     );
     expect(reviewAck).toHaveBeenCalledTimes(1);
     expect(reviewRespond).toHaveBeenCalledWith({
@@ -317,6 +322,7 @@ describe("registerSlackMessageHandler actions", () => {
       "U123",
       "C08TEMPLATE",
       "1710000000.0001",
+      "thread_abc",
     );
     expect(mergeAck).toHaveBeenCalledTimes(1);
     expect(mergeRespond).toHaveBeenCalledWith({
@@ -371,6 +377,7 @@ describe("registerSlackMessageHandler actions", () => {
       "C08TEMPLATE",
       "1710000000.0001",
       "approve",
+      17,
     );
     expect(choiceAck).toHaveBeenCalledTimes(1);
     expect(choiceRespond).toHaveBeenCalledWith({
@@ -409,6 +416,7 @@ describe("registerSlackMessageHandler actions", () => {
     const respond = vi.fn().mockResolvedValue(undefined);
 
     await actionHandlers.get("interrupt")?.({
+      action: { action_id: "interrupt", value: "interrupt:turn_abc" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -472,6 +480,94 @@ describe("registerSlackMessageHandler actions", () => {
     });
   });
 
+  it("rejects legacy untagged mutating controls before reaching the router", async () => {
+    const actionHandlers = new Map<string, (args: ActionListenerArgs) => Promise<void>>();
+    const interruptThread = vi.fn();
+    const startReview = vi.fn();
+    const mergeToMain = vi.fn();
+
+    registerSlackMessageHandler(
+      {
+        event: vi.fn(),
+        action(matcher, listener) {
+          if (typeof matcher === "string") {
+            actionHandlers.set(matcher, listener as (args: ActionListenerArgs) => Promise<void>);
+          }
+        },
+      },
+      {
+        handleSlackMessage: vi.fn(),
+        interruptThread,
+        submitChoice: vi.fn(),
+        startReview,
+        restartRouter: vi.fn(),
+        mergeToMain,
+        confirmMergeToMain: vi.fn(),
+        getThreadStatus: vi.fn(),
+      } as unknown as RouterService,
+    );
+
+    const interruptAck = vi.fn().mockResolvedValue(undefined);
+    const interruptRespond = vi.fn().mockResolvedValue(undefined);
+    await actionHandlers.get("interrupt")?.({
+      action: { action_id: "interrupt", value: "interrupt" },
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack: interruptAck,
+      respond: interruptRespond,
+    });
+
+    const reviewAck = vi.fn().mockResolvedValue(undefined);
+    const reviewRespond = vi.fn().mockResolvedValue(undefined);
+    await actionHandlers.get("review")?.({
+      action: { action_id: "review", value: "review" },
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack: reviewAck,
+      respond: reviewRespond,
+    });
+
+    const mergeAck = vi.fn().mockResolvedValue(undefined);
+    const mergeRespond = vi.fn().mockResolvedValue(undefined);
+    await actionHandlers.get("merge_to_main")?.({
+      action: { action_id: "merge_to_main", value: "merge_to_main" },
+      body: {
+        channel: { id: "C08TEMPLATE" },
+        message: { thread_ts: "1710000000.0001" },
+        user: { id: "U123" },
+      },
+      ack: mergeAck,
+      respond: mergeRespond,
+    });
+
+    expect(interruptAck).toHaveBeenCalledTimes(1);
+    expect(interruptThread).not.toHaveBeenCalled();
+    expect(interruptRespond).toHaveBeenCalledWith({
+      text: "Interrupt control is stale. Request the latest update and try again.",
+      replace_original: false,
+    });
+
+    expect(reviewAck).toHaveBeenCalledTimes(1);
+    expect(startReview).not.toHaveBeenCalled();
+    expect(reviewRespond).toHaveBeenCalledWith({
+      text: "Review control is stale. Request the latest update and try again.",
+      replace_original: false,
+    });
+
+    expect(mergeAck).toHaveBeenCalledTimes(1);
+    expect(mergeToMain).not.toHaveBeenCalled();
+    expect(mergeRespond).toHaveBeenCalledWith({
+      text: "Merge preview control is stale. Request a fresh merge preview.",
+      replace_original: false,
+    });
+  });
+
   it("rejects interactive actions from unauthorized users", async () => {
     const actionHandlers = new Map<string, (args: ActionListenerArgs) => Promise<void>>();
 
@@ -502,6 +598,7 @@ describe("registerSlackMessageHandler actions", () => {
     const respond = vi.fn().mockResolvedValue(undefined);
 
     await actionHandlers.get("interrupt")?.({
+      action: { action_id: "interrupt", value: "interrupt:turn_abc" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -549,7 +646,7 @@ describe("registerSlackMessageHandler actions", () => {
     const respond = vi.fn().mockResolvedValue(undefined);
 
     await choiceHandler?.({
-      action: { action_id: "codex_choice:approve" },
+      action: { action_id: "codex_choice:17:approve" },
       body: {
         channel: { id: "C08TEMPLATE" },
         message: { thread_ts: "1710000000.0001" },
@@ -565,6 +662,7 @@ describe("registerSlackMessageHandler actions", () => {
       "C08TEMPLATE",
       "1710000000.0001",
       "approve",
+      17,
     );
     expect(respond).toHaveBeenCalledWith({
       text: "Submitted choice: approve",

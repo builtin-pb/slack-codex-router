@@ -50,4 +50,42 @@ describe("slack blocks regressions", () => {
       ],
     });
   });
+
+  it("renders mutating controls with the identity tags they rely on", () => {
+    const blocks = buildThreadControls({
+      canInterrupt: true,
+      canReview: true,
+      canMerge: true,
+      interruptTurnId: "turn_abc",
+      reviewThreadId: "thread_review",
+      mergeThreadId: "thread_merge",
+    });
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: "actions",
+      elements: [
+        expect.objectContaining({ action_id: "status" }),
+        expect.objectContaining({
+          action_id: "interrupt",
+          value: "interrupt:turn_abc",
+        }),
+        expect.objectContaining({ action_id: "what_changed" }),
+        expect.objectContaining({ action_id: "open_diff" }),
+        expect.objectContaining({
+          action_id: "review",
+          value: "review:thread_review",
+        }),
+        expect.objectContaining({
+          action_id: "merge_to_main",
+          value: "merge_to_main:thread_merge",
+        }),
+        expect.objectContaining({ action_id: "restart_router" }),
+        expect.objectContaining({ action_id: "archive_task" }),
+      ],
+    });
+    expect(JSON.stringify(blocks)).toContain("interrupt:turn_abc");
+    expect(JSON.stringify(blocks)).toContain("review:thread_review");
+    expect(JSON.stringify(blocks)).toContain("merge_to_main:thread_merge");
+  });
 });

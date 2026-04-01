@@ -29,13 +29,22 @@ export type SlackBlock = SectionBlock | ActionsBlock;
 
 export function buildThreadControls(state: {
   canInterrupt: boolean;
+  interruptTurnId?: string | null;
   canReview: boolean;
+  reviewThreadId?: string | null;
   canMerge: boolean;
+  mergeThreadId?: string | null;
 }): SlackBlock[] {
   const elements: ButtonElement[] = [buildButton("status", "Status")];
 
-  if (state.canInterrupt) {
-    elements.push(buildButton("interrupt", "Interrupt"));
+  if (state.canInterrupt && state.interruptTurnId) {
+    elements.push(
+      buildButton(
+        "interrupt",
+        "Interrupt",
+        `interrupt:${state.interruptTurnId}`,
+      ),
+    );
   }
 
   elements.push(
@@ -43,12 +52,24 @@ export function buildThreadControls(state: {
     buildButton("open_diff", "Open diff"),
   );
 
-  if (state.canReview) {
-    elements.push(buildButton("review", "Review"));
+  if (state.canReview && state.reviewThreadId) {
+    elements.push(
+      buildButton(
+        "review",
+        "Review",
+        `review:${state.reviewThreadId}`,
+      ),
+    );
   }
 
-  if (state.canMerge) {
-    elements.push(buildButton("merge_to_main", "Merge to main"));
+  if (state.canMerge && state.mergeThreadId) {
+    elements.push(
+      buildButton(
+        "merge_to_main",
+        "Merge to main",
+        `merge_to_main:${state.mergeThreadId}`,
+      ),
+    );
   }
 
   elements.push(

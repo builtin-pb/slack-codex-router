@@ -8,6 +8,7 @@ export type SlackActionRespondFn = (message: {
 }) => Promise<unknown>;
 
 type MergeSelection = {
+  promptId?: number;
   sourceBranch: string;
   targetBranch: string;
 };
@@ -65,18 +66,26 @@ export function registerThreadControlActions(
     });
   });
 
-  app.action("interrupt", async ({ ack, body, respond }) => {
+  app.action("interrupt", async ({ ack, action, body, respond }) => {
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
-      await router.interruptThread(userId, channelId, threadTs);
+      const expectedTurnId = resolveInterruptTurnId(action);
+      if (!expectedTurnId) {
+        throw new Error("Interrupt control is stale. Request the latest update and try again.");
+      }
+      await router.interruptThread(userId, channelId, threadTs, expectedTurnId);
       return "Interrupted current turn.";
     });
   });
 
-  app.action("review", async ({ ack, body, respond }) => {
+  app.action("review", async ({ ack, action, body, respond }) => {
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
-      await router.startReview(userId, channelId, threadTs);
+      const expectedThreadId = resolveReviewThreadId(action);
+      if (!expectedThreadId) {
+        throw new Error("Review control is stale. Request the latest update and try again.");
+      }
+      await router.startReview(userId, channelId, threadTs, expectedThreadId);
       return "Started review for uncommitted changes.";
     });
   });
@@ -85,7 +94,8 @@ export function registerThreadControlActions(
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
       const choice = resolveChoiceValue(action);
-      await router.submitChoice(userId, channelId, threadTs, choice);
+      const promptId = resolveChoicePromptId(action);
+      await router.submitChoice(userId, channelId, threadTs, choice, promptId);
       return `Submitted choice: ${choice}`;
     });
   });
@@ -102,10 +112,14 @@ export function registerThreadControlActions(
     });
   });
 
-  app.action("merge_to_main", async ({ ack, body, respond }) => {
+  app.action("merge_to_main", async ({ ack, action, body, respond }) => {
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
-      return router.mergeToMain(userId, channelId, threadTs);
+      const expectedThreadId = resolveMergeThreadId(action);
+      if (!expectedThreadId) {
+        throw new Error("Merge preview control is stale. Request a fresh merge preview.");
+      }
+      return router.mergeToMain(userId, channelId, threadTs, expectedThreadId);
     });
   });
 
@@ -113,8 +127,11 @@ export function registerThreadControlActions(
     await handleAction(ack, respond, async () => {
       const { userId, channelId, threadTs } = getActionContext(body);
       const rawSelection = action?.value?.trim();
+      if (!rawSelection) {
+        throw new Error("Malformed merge confirmation.");
+      }
       const expectedSelection = parseMergeSelection(action);
-      if (rawSelection && !expectedSelection) {
+      if (!expectedSelection) {
         throw new Error("Malformed merge confirmation.");
       }
       return router.confirmMergeToMain(userId, channelId, threadTs, expectedSelection);
@@ -191,20 +208,140 @@ function getActionContext(body: SlackActionBody): {
   };
 }
 
+function resolveInterruptTurnId(action?: SlackAction): string | undefined {
+  const value = action?.value?.trim();
+  if (!value || !value.startsWith("interrupt:")) {
+    return undefined;
+  }
+
+  const turnId = value.slice("interrupt:".length).trim();
+  return turnId || undefined;
+}
+
+function resolveReviewThreadId(action?: SlackAction): string | undefined {
+  const value = action?.value?.trim();
+  if (!value || !value.startsWith("review:")) {
+    return undefined;
+  }
+
+  const threadId = value.slice("review:".length).trim();
+  return threadId || undefined;
+}
+
+function resolveMergeThreadId(action?: SlackAction): string | undefined {
+  const value = action?.value?.trim();
+  if (!value || !value.startsWith("merge_to_main:")) {
+    return undefined;
+  }
+
+  const threadId = value.slice("merge_to_main:".length).trim();
+  return threadId || undefined;
+}
+
 function resolveChoiceValue(action?: SlackAction): string {
-  if (action?.value?.trim()) {
-    return action.value.trim();
+  const value = action?.value?.trim();
+  if (value) {
+    const taggedChoice = parseTaggedChoiceValue(value);
+    return taggedChoice?.choice ?? value;
   }
 
   const actionId = action?.action_id ?? "";
+  const taggedAction = parseTaggedChoiceActionId(actionId);
+  if (taggedAction) {
+    return taggedAction.choice.trim();
+  }
+
   const [, choice = ""] = actionId.split("codex_choice:");
   return choice.trim();
+}
+
+function resolveChoicePromptId(action?: SlackAction): number | undefined {
+  const value = action?.value?.trim();
+  if (value) {
+    return parseTaggedChoiceValue(value)?.promptId;
+  }
+
+  const actionId = action?.action_id ?? "";
+  return parseTaggedChoiceActionId(actionId)?.promptId;
+}
+
+function parseTaggedChoiceValue(
+  value: string,
+): { promptId: number; choice: string } | undefined {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex >= value.length - 1) {
+    return undefined;
+  }
+
+  const promptId = Number.parseInt(value.slice(0, separatorIndex), 10);
+  if (!Number.isInteger(promptId) || promptId <= 0) {
+    return undefined;
+  }
+
+  return {
+    promptId,
+    choice: value.slice(separatorIndex + 1),
+  };
+}
+
+function parseTaggedChoiceActionId(
+  actionId: string,
+): { promptId: number; choice: string } | undefined {
+  const prefix = "codex_choice:";
+  if (!actionId.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const taggedValue = actionId.slice(prefix.length);
+  const separatorIndex = taggedValue.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex >= taggedValue.length - 1) {
+    return undefined;
+  }
+
+  const promptId = Number.parseInt(taggedValue.slice(0, separatorIndex), 10);
+  if (!Number.isInteger(promptId) || promptId <= 0) {
+    return undefined;
+  }
+
+  return {
+    promptId,
+    choice: decodeChoiceActionComponent(taggedValue.slice(separatorIndex + 1)),
+  };
+}
+
+function decodeChoiceActionComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function parseMergeSelection(action?: SlackAction): MergeSelection | undefined {
   const value = action?.value?.trim();
   if (!value) {
     return undefined;
+  }
+
+  const promptSeparatorIndex = value.indexOf(":");
+  if (promptSeparatorIndex > 0 && promptSeparatorIndex < value.length - 1) {
+    const promptId = Number.parseInt(value.slice(0, promptSeparatorIndex), 10);
+    if (Number.isInteger(promptId) && promptId > 0) {
+      const branchSelection = value.slice(promptSeparatorIndex + 1);
+      const branchSeparatorIndex = branchSelection.lastIndexOf(":");
+      if (
+        branchSeparatorIndex > 0 &&
+        branchSeparatorIndex < branchSelection.length - 1
+      ) {
+        return {
+          promptId,
+          sourceBranch: branchSelection.slice(0, branchSeparatorIndex),
+          targetBranch: branchSelection.slice(branchSeparatorIndex + 1),
+        };
+      }
+
+      return undefined;
+    }
   }
 
   const separatorIndex = value.lastIndexOf(":");

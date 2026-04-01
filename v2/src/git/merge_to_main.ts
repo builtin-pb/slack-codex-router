@@ -37,7 +37,13 @@ export type MergeRunner = (input: {
   cwd: string;
 }) => Promise<{ stdout: string }>;
 
+type HeadState =
+  | { kind: "branch"; value: string }
+  | { kind: "detached"; value: string }
+  | null;
+
 export function buildMergeConfirmation(input: {
+  promptId?: number;
   repositoryName: string;
   sourceBranch: string;
   targetBranch: string;
@@ -70,7 +76,10 @@ export function buildMergeConfirmation(input: {
             type: "plain_text",
             text: "Confirm merge",
           },
-          value: `${input.sourceBranch}:${input.targetBranch}`,
+          value:
+            input.promptId && Number.isInteger(input.promptId) && input.promptId > 0
+              ? `${input.promptId}:${input.sourceBranch}:${input.targetBranch}`
+              : `${input.sourceBranch}:${input.targetBranch}`,
           style: "primary",
         },
       ],
@@ -93,16 +102,69 @@ export async function mergeBranchToTarget(input: {
       }),
     }));
 
+  const originalBranch = (
+    await run({
+      args: ["branch", "--show-current"],
+      cwd: input.repoPath,
+    })
+  ).stdout.trim();
+  const originalHead = await readHeadState(run, input.repoPath, originalBranch);
+
   await run({
     args: ["checkout", input.targetBranch],
     cwd: input.repoPath,
   });
-  await run({
-    args: ["merge", "--no-ff", "--no-edit", input.sourceBranch],
-    cwd: input.repoPath,
-  });
+
+  try {
+    await run({
+      args: ["merge", "--no-ff", "--no-edit", input.sourceBranch],
+      cwd: input.repoPath,
+    });
+  } catch (error) {
+    try {
+      await run({
+        args: ["merge", "--abort"],
+        cwd: input.repoPath,
+      });
+    } catch {
+      // Best-effort cleanup only; preserve the original merge failure.
+    }
+
+    throw error;
+  } finally {
+    if (originalHead?.kind === "branch" && originalHead.value !== input.targetBranch) {
+      await run({
+        args: ["checkout", originalHead.value],
+        cwd: input.repoPath,
+      });
+    } else if (originalHead?.kind === "detached") {
+      await run({
+        args: ["checkout", originalHead.value],
+        cwd: input.repoPath,
+      });
+    }
+  }
 
   return {
     text: `Merged ${input.sourceBranch} into ${input.targetBranch}.`,
   };
+}
+
+async function readHeadState(
+  run: MergeRunner,
+  repoPath: string,
+  originalBranch: string,
+): Promise<HeadState> {
+  if (originalBranch) {
+    return { kind: "branch", value: originalBranch };
+  }
+
+  const detachedHead = (
+    await run({
+      args: ["rev-parse", "HEAD"],
+      cwd: repoPath,
+    })
+  ).stdout.trim();
+
+  return detachedHead ? { kind: "detached", value: detachedHead } : null;
 }

@@ -6,8 +6,11 @@ describe("mergeBranchToTarget default runner", () => {
     vi.resetModules();
   });
 
-  it("uses execFileSync for checkout and merge when no custom runner is provided", async () => {
-    const execFileSync = vi.fn(() => "");
+  it("uses execFileSync to detect the original branch, merge on the target branch, and restore the original branch", async () => {
+    const execFileSync = vi
+      .fn()
+      .mockReturnValueOnce("feature/original\n")
+      .mockReturnValue("");
 
     vi.doMock("node:child_process", () => ({
       execFileSync,
@@ -21,14 +24,27 @@ describe("mergeBranchToTarget default runner", () => {
       targetBranch: "main",
     });
 
-    expect(execFileSync).toHaveBeenNthCalledWith(1, "git", ["checkout", "main"], {
+    expect(execFileSync).toHaveBeenNthCalledWith(1, "git", ["branch", "--show-current"], {
+      cwd: "/repo/template",
+      encoding: "utf8",
+    });
+    expect(execFileSync).toHaveBeenNthCalledWith(2, "git", ["checkout", "main"], {
       cwd: "/repo/template",
       encoding: "utf8",
     });
     expect(execFileSync).toHaveBeenNthCalledWith(
-      2,
+      3,
       "git",
       ["merge", "--no-ff", "--no-edit", "codex/slack/1710000000-0001"],
+      {
+        cwd: "/repo/template",
+        encoding: "utf8",
+      },
+    );
+    expect(execFileSync).toHaveBeenNthCalledWith(
+      4,
+      "git",
+      ["checkout", "feature/original"],
       {
         cwd: "/repo/template",
         encoding: "utf8",

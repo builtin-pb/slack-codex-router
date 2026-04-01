@@ -21,6 +21,8 @@ function makeRuntimeHarness() {
   const postMessage = vi.fn().mockResolvedValue(undefined);
   const start = vi.fn().mockResolvedValue(undefined);
   const upsertThread = vi.fn();
+  const recordChoicePrompt = vi.fn().mockReturnValue(17);
+  const discardChoicePrompt = vi.fn();
   const threadRecord = {
     slackChannelId: "C123",
     slackThreadTs: "1710000000.0001",
@@ -35,13 +37,17 @@ function makeRuntimeHarness() {
   return {
     notifications,
     postMessage,
+    recordChoicePrompt,
+    discardChoicePrompt,
     upsertThread,
     registerSlackMessageHandler,
     store: {
       getPendingRestartIntent: vi.fn().mockReturnValue(null),
       listRecoverableThreads: vi.fn().mockReturnValue([threadRecord]),
       clearRestartIntent: vi.fn(),
+      discardChoicePrompt,
       upsertThread,
+      recordChoicePrompt,
     },
     appServerClient: {
       initialize,
@@ -384,14 +390,14 @@ describe("startRouterRuntime event bridge", () => {
           type: "actions",
           elements: expect.arrayContaining([
             expect.objectContaining({
-              action_id: "codex_choice:approval-1",
+              action_id: "codex_choice:17:Approve",
               text: expect.objectContaining({ text: "Approve" }),
-              value: "Approve",
+              value: "17:Approve",
             }),
             expect.objectContaining({
-              action_id: "codex_choice:approval-2",
+              action_id: "codex_choice:17:Revise",
               text: expect.objectContaining({ text: "Revise" }),
-              value: "Revise",
+              value: "17:Revise",
             }),
           ]),
         },
@@ -410,6 +416,100 @@ describe("startRouterRuntime event bridge", () => {
     expect(harness.upsertThread).toHaveBeenCalledWith({
       ...harness.threadRecord,
       state: "awaiting_user_input",
+    });
+    expect(harness.recordChoicePrompt).toHaveBeenCalledWith({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      options: ["Approve", "Revise"],
+    });
+  });
+
+  it("posts a fallback choice prompt when requestUserInput has options but no prompt text", async () => {
+    const harness = makeRuntimeHarness();
+
+    await startRouterRuntime({
+      config: {
+        slackBotToken: "xoxb-test",
+        slackAppToken: "xapp-test",
+        allowedUserId: "U123",
+        projectsFile: "/repo/config/projects.yaml",
+        routerStateDb: "/repo/logs/router-v2.sqlite3",
+        appServerCommand: ["codex", "app-server"],
+      },
+      store: harness.store,
+      appServerProcess: {
+        writeLine: vi.fn(),
+        onLine: vi.fn().mockReturnValue(() => {}),
+        waitForExit: vi.fn().mockResolvedValue(0),
+      },
+      appServerClient: harness.appServerClient,
+      slackApp: harness.slackApp,
+      routerService: {},
+      registerSlackMessageHandler: harness.registerSlackMessageHandler,
+    });
+
+    harness.notifications[0]?.({
+      method: "tool/requestUserInput",
+      params: {
+        threadId: "thread_abc",
+        questions: [
+          {
+            id: "approval",
+            options: [{ label: "Approve" }, { label: "Reject" }],
+          },
+        ],
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(harness.postMessage).toHaveBeenCalledWith({
+      channel: "C123",
+      text: "Codex needs your input",
+      thread_ts: "1710000000.0001",
+      blocks: [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: "*Codex needs your input*",
+          },
+        },
+        {
+          type: "actions",
+          elements: expect.arrayContaining([
+            expect.objectContaining({
+              action_id: "codex_choice:17:Approve",
+              text: expect.objectContaining({ text: "Approve" }),
+              value: "17:Approve",
+            }),
+            expect.objectContaining({
+              action_id: "codex_choice:17:Reject",
+              text: expect.objectContaining({ text: "Reject" }),
+              value: "17:Reject",
+            }),
+          ]),
+        },
+        {
+          type: "actions",
+          elements: expect.arrayContaining([
+            expect.objectContaining({ action_id: "status" }),
+            expect.objectContaining({ action_id: "what_changed" }),
+            expect.objectContaining({ action_id: "open_diff" }),
+            expect.objectContaining({ action_id: "restart_router" }),
+            expect.objectContaining({ action_id: "archive_task" }),
+          ]),
+        },
+      ],
+    });
+    expect(harness.upsertThread).toHaveBeenCalledWith({
+      ...harness.threadRecord,
+      state: "awaiting_user_input",
+    });
+    expect(harness.recordChoicePrompt).toHaveBeenCalledWith({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      options: ["Approve", "Reject"],
     });
   });
 
@@ -454,6 +554,68 @@ describe("startRouterRuntime event bridge", () => {
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to bridge App Server notification",
+      expect.any(Error),
+    );
+
+    consoleError.mockRestore();
+  });
+
+  it("does not persist a new choice prompt or awaiting_user_input state when Slack delivery fails", async () => {
+    const harness = makeRuntimeHarness();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    harness.postMessage.mockRejectedValueOnce(new Error("choice post unavailable"));
+
+    await startRouterRuntime({
+      config: {
+        slackBotToken: "xoxb-test",
+        slackAppToken: "xapp-test",
+        allowedUserId: "U123",
+        projectsFile: "/repo/config/projects.yaml",
+        routerStateDb: "/repo/logs/router-v2.sqlite3",
+        appServerCommand: ["codex", "app-server"],
+      },
+      store: harness.store,
+      appServerProcess: {
+        writeLine: vi.fn(),
+        onLine: vi.fn().mockReturnValue(() => {}),
+        waitForExit: vi.fn().mockResolvedValue(0),
+      },
+      appServerClient: harness.appServerClient,
+      slackApp: harness.slackApp,
+      routerService: {},
+      registerSlackMessageHandler: harness.registerSlackMessageHandler,
+    });
+
+    harness.notifications[0]?.({
+      method: "tool/requestUserInput",
+      params: {
+        threadId: "thread_abc",
+        questions: [
+          {
+            id: "approval",
+            header: "Approval",
+            question: "Need approval to continue.",
+            options: [{ label: "Approve" }, { label: "Revise" }],
+          },
+        ],
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(harness.recordChoicePrompt).toHaveBeenCalledWith({
+      slackChannelId: "C123",
+      slackThreadTs: "1710000000.0001",
+      options: ["Approve", "Revise"],
+    });
+    expect(harness.discardChoicePrompt).toHaveBeenCalledWith(17);
+    expect(harness.upsertThread).not.toHaveBeenCalledWith({
+      ...harness.threadRecord,
+      state: "awaiting_user_input",
+    });
     expect(consoleError).toHaveBeenCalledWith(
       "Failed to bridge App Server notification",
       expect.any(Error),

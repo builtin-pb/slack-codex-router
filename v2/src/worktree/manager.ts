@@ -27,27 +27,39 @@ export class WorktreeManager {
   ): Promise<{ worktreePath: string; branchName: string }> {
     const branchName = buildBranchName(input.slackThreadTs);
     const worktreePath = buildWorktreePath(input.repoPath, input.slackThreadTs);
+    const pathExistsBeforeCreation = this.pathExists(worktreePath);
 
-    if (!this.pathExists(worktreePath)) {
-      try {
-        await this.run({
-          args: [
-            "worktree",
-            "add",
-            "-b",
-            branchName,
-            worktreePath,
-            input.baseBranch,
-          ],
-          cwd: input.repoPath,
-        });
-      } catch (error) {
-        if (
-          !this.pathExists(worktreePath) ||
-          !looksLikeConcurrentWorktreeCreationError(error)
-        ) {
-          throw error;
-        }
+    if (pathExistsBeforeCreation) {
+      if (!this.pathExists(join(worktreePath, ".git"))) {
+        throw new Error(
+          `Worktree path already exists before worktree creation starts: ${worktreePath}`,
+        );
+      }
+
+      return {
+        worktreePath,
+        branchName,
+      };
+    }
+
+    try {
+      await this.run({
+        args: [
+          "worktree",
+          "add",
+          "-b",
+          branchName,
+          worktreePath,
+          input.baseBranch,
+        ],
+        cwd: input.repoPath,
+      });
+    } catch (error) {
+      if (
+        !this.pathExists(worktreePath) ||
+        !looksLikeConcurrentWorktreeCreationError(error)
+      ) {
+        throw error;
       }
     }
 
@@ -68,5 +80,8 @@ export function buildWorktreePath(repoPath: string, threadTs: string): string {
 
 function looksLikeConcurrentWorktreeCreationError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /already exists|already checked out|branch .* already exists/i.test(message);
+  return (
+    /already checked out/i.test(message) ||
+    (/already exists/i.test(message) && !/branch .* already exists/i.test(message))
+  );
 }

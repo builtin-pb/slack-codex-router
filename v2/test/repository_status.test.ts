@@ -58,12 +58,28 @@ describe("getRepositoryStatus", () => {
     expect(status.worktreeStatus).toBe("dirty");
   });
 
-  it("does not ignore tracked changes under .codex-worktrees", async () => {
+  it("ignores administrative tracked changes under .codex-worktrees when they are the only changes", async () => {
     const status = await getRepositoryStatus({
       repoPath: "/repo/template",
       sourceBranch: "feature/test",
       targetBranch: "main",
       run: vi.fn().mockResolvedValue({ stdout: "D  .codex-worktrees/1710000000-0001/info.txt\n" }),
+    });
+
+    expect(status.worktreeStatus).toBe("clean");
+  });
+
+  it("still marks the repo dirty when real file changes exist beside tracked .codex-worktrees admin entries", async () => {
+    const status = await getRepositoryStatus({
+      repoPath: "/repo/template",
+      sourceBranch: "feature/test",
+      targetBranch: "main",
+      run: vi
+        .fn()
+        .mockResolvedValue({
+          stdout:
+            "D  .codex-worktrees/1710000000-0001/info.txt\nM  src/router.ts\n",
+        }),
     });
 
     expect(status.worktreeStatus).toBe("dirty");

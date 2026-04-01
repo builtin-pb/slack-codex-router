@@ -16,6 +16,11 @@ type DatabaseHandle = {
   close(): void;
 };
 
+type StatementRunResult = {
+  lastInsertRowid?: number | bigint;
+  changes?: number;
+};
+
 type TableInfoRow = {
   name: string;
 };
@@ -29,6 +34,20 @@ const Database = require("better-sqlite3") as new (databasePath: string) => Data
 
 type ThreadRow = PersistedThreadRow;
 type RestartIntentRow = RestartIntent;
+type ChoicePromptPayload = {
+  promptId: number;
+  options: string[];
+};
+type MergePreviewPayload = {
+  promptId: number;
+  sourceBranch: string;
+  targetBranch: string;
+};
+type ChoicePromptRow = {
+  promptId: number;
+  promptPayloadJson: string;
+};
+type MergePreviewRow = ChoicePromptRow;
 
 export class RouterStore {
   private readonly db: DatabaseHandle;
@@ -173,6 +192,192 @@ export class RouterStore {
     this.db.prepare("DELETE FROM restart_intents WHERE id = 1").run();
   }
 
+  clearRestartIntentIfMatches(intent: RestartIntent | null): boolean {
+    if (!intent) {
+      return false;
+    }
+
+    const result = this.db
+      .prepare(
+        `
+        DELETE FROM restart_intents
+        WHERE id = 1
+          AND slack_channel_id = ?
+          AND slack_thread_ts = ?
+          AND requested_at = ?
+      `,
+      )
+      .run(intent.slackChannelId, intent.slackThreadTs, intent.requestedAt) as StatementRunResult;
+
+    return (result.changes ?? 0) > 0;
+  }
+
+  recordChoicePrompt(input: {
+    slackChannelId: string;
+    slackThreadTs: string;
+    options: string[];
+  }): number | null {
+    const options = normalizeChoiceOptions(input.options);
+    if (options.length === 0) {
+      return null;
+    }
+
+    const result = this.db
+      .prepare(
+        `
+        INSERT INTO interactive_prompts (
+          slack_channel_id,
+          slack_thread_ts,
+          prompt_kind,
+          prompt_payload_json
+        ) VALUES (?, ?, 'choice', ?)
+      `,
+      )
+      .run(
+        input.slackChannelId,
+        input.slackThreadTs,
+        JSON.stringify({ options }),
+      ) as StatementRunResult;
+
+    const promptId = normalizePromptId(result.lastInsertRowid);
+    return promptId;
+  }
+
+  getLatestChoicePrompt(
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): ChoicePromptPayload | null {
+    const row = this.db
+      .prepare(
+        `
+        SELECT
+          prompt_id AS promptId,
+          prompt_payload_json AS promptPayloadJson
+        FROM interactive_prompts
+        WHERE slack_channel_id = ?
+          AND slack_thread_ts = ?
+          AND prompt_kind = 'choice'
+          AND resolved_at IS NULL
+        ORDER BY prompt_id DESC
+        LIMIT 1
+      `,
+      )
+      .get(slackChannelId, slackThreadTs) as ChoicePromptRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return parseChoicePromptPayload(row.promptId, row.promptPayloadJson);
+  }
+
+  resolveChoicePrompts(slackChannelId: string, slackThreadTs: string): void {
+    this.db
+      .prepare(
+        `
+        UPDATE interactive_prompts
+        SET resolved_at = CURRENT_TIMESTAMP
+        WHERE slack_channel_id = ?
+          AND slack_thread_ts = ?
+          AND prompt_kind = 'choice'
+          AND resolved_at IS NULL
+      `,
+      )
+      .run(slackChannelId, slackThreadTs);
+  }
+
+  discardChoicePrompt(promptId: number): void {
+    if (!Number.isInteger(promptId) || promptId <= 0) {
+      return;
+    }
+
+    this.db
+      .prepare(
+        `
+        DELETE FROM interactive_prompts
+        WHERE prompt_id = ?
+          AND prompt_kind = 'choice'
+          AND resolved_at IS NULL
+      `,
+      )
+      .run(promptId);
+  }
+
+  recordMergePreview(input: {
+    slackChannelId: string;
+    slackThreadTs: string;
+    sourceBranch: string;
+    targetBranch: string;
+  }): number | null {
+    const sourceBranch = input.sourceBranch.trim();
+    const targetBranch = input.targetBranch.trim();
+    if (!sourceBranch || !targetBranch) {
+      return null;
+    }
+
+    const result = this.db
+      .prepare(
+        `
+        INSERT INTO interactive_prompts (
+          slack_channel_id,
+          slack_thread_ts,
+          prompt_kind,
+          prompt_payload_json
+        ) VALUES (?, ?, 'merge_preview', ?)
+      `,
+      )
+      .run(
+        input.slackChannelId,
+        input.slackThreadTs,
+        JSON.stringify({ sourceBranch, targetBranch }),
+      ) as StatementRunResult;
+
+    return normalizePromptId(result.lastInsertRowid);
+  }
+
+  getLatestMergePreview(
+    slackChannelId: string,
+    slackThreadTs: string,
+  ): MergePreviewPayload | null {
+    const row = this.db
+      .prepare(
+        `
+        SELECT
+          prompt_id AS promptId,
+          prompt_payload_json AS promptPayloadJson
+        FROM interactive_prompts
+        WHERE slack_channel_id = ?
+          AND slack_thread_ts = ?
+          AND prompt_kind = 'merge_preview'
+          AND resolved_at IS NULL
+        ORDER BY prompt_id DESC
+        LIMIT 1
+      `,
+      )
+      .get(slackChannelId, slackThreadTs) as MergePreviewRow | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return parseMergePreviewPayload(row.promptId, row.promptPayloadJson);
+  }
+
+  resolveMergePreviews(slackChannelId: string, slackThreadTs: string): void {
+    this.db
+      .prepare(
+        `
+        UPDATE interactive_prompts
+        SET resolved_at = CURRENT_TIMESTAMP
+        WHERE slack_channel_id = ?
+          AND slack_thread_ts = ?
+          AND prompt_kind = 'merge_preview'
+          AND resolved_at IS NULL
+      `,
+      )
+      .run(slackChannelId, slackThreadTs);
+  }
+
   close(): void {
     this.db.close();
   }
@@ -210,4 +415,60 @@ function normalizeThreadRow(row: ThreadRow): ThreadRecord {
     activeTurnId: row.activeTurnId ?? null,
     appServerSessionStale: Boolean(row.appServerSessionStale),
   };
+}
+
+function normalizeChoiceOptions(options: string[]): string[] {
+  return options.map((option) => option.trim()).filter((option) => option.length > 0);
+}
+
+function normalizePromptId(value: number | bigint | undefined): number | null {
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function parseChoicePromptPayload(
+  promptIdValue: number,
+  payloadJson: string,
+): ChoicePromptPayload | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as { options?: unknown };
+    if (!Array.isArray(parsed.options)) {
+      return null;
+    }
+
+    const options = normalizeChoiceOptions(
+      parsed.options.filter((option): option is string => typeof option === "string"),
+    );
+
+    const promptId = normalizePromptId(promptIdValue);
+    return options.length > 0 && promptId ? { promptId, options } : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseMergePreviewPayload(
+  promptIdValue: number,
+  payloadJson: string,
+): MergePreviewPayload | null {
+  try {
+    const parsed = JSON.parse(payloadJson) as {
+      sourceBranch?: unknown;
+      targetBranch?: unknown;
+    };
+    const promptId = normalizePromptId(promptIdValue);
+    const sourceBranch =
+      typeof parsed.sourceBranch === "string" ? parsed.sourceBranch.trim() : "";
+    const targetBranch =
+      typeof parsed.targetBranch === "string" ? parsed.targetBranch.trim() : "";
+
+    return promptId && sourceBranch && targetBranch
+      ? { promptId, sourceBranch, targetBranch }
+      : null;
+  } catch {
+    return null;
+  }
 }

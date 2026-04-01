@@ -28,8 +28,11 @@ describe("buildMergeConfirmation", () => {
     expect(JSON.stringify(blocks)).toContain("confirm_merge_to_main");
   });
 
-  it("checks out the target branch and merges the source branch", async () => {
-    const run = vi.fn().mockResolvedValue({ stdout: "" });
+  it("detects the original branch, merges on the target branch, and restores the original branch", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "feature/original\n" })
+      .mockResolvedValue({ stdout: "" });
 
     const result = await mergeBranchToTarget({
       repoPath: "/repo/template/.codex-worktrees/1710000000-0001",
@@ -39,15 +42,63 @@ describe("buildMergeConfirmation", () => {
     });
 
     expect(run).toHaveBeenNthCalledWith(1, {
-      args: ["checkout", "main"],
+      args: ["branch", "--show-current"],
       cwd: "/repo/template/.codex-worktrees/1710000000-0001",
     });
     expect(run).toHaveBeenNthCalledWith(2, {
+      args: ["checkout", "main"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0001",
+    });
+    expect(run).toHaveBeenNthCalledWith(3, {
       args: ["merge", "--no-ff", "--no-edit", "codex/slack/1710000000-0001"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0001",
+    });
+    expect(run).toHaveBeenNthCalledWith(4, {
+      args: ["checkout", "feature/original"],
       cwd: "/repo/template/.codex-worktrees/1710000000-0001",
     });
     expect(result).toEqual({
       text: "Merged codex/slack/1710000000-0001 into main.",
+    });
+  });
+
+  it("restores a detached HEAD after a successful merge", async () => {
+    const detachedHead = "abc123def456";
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "\n" })
+      .mockResolvedValueOnce({ stdout: `${detachedHead}\n` })
+      .mockResolvedValue({ stdout: "" });
+
+    const result = await mergeBranchToTarget({
+      repoPath: "/repo/template",
+      sourceBranch: "codex/slack/1710000000-0002",
+      targetBranch: "main",
+      run,
+    });
+
+    expect(run).toHaveBeenNthCalledWith(1, {
+      args: ["branch", "--show-current"],
+      cwd: "/repo/template",
+    });
+    expect(run).toHaveBeenNthCalledWith(2, {
+      args: ["rev-parse", "HEAD"],
+      cwd: "/repo/template",
+    });
+    expect(run).toHaveBeenNthCalledWith(3, {
+      args: ["checkout", "main"],
+      cwd: "/repo/template",
+    });
+    expect(run).toHaveBeenNthCalledWith(4, {
+      args: ["merge", "--no-ff", "--no-edit", "codex/slack/1710000000-0002"],
+      cwd: "/repo/template",
+    });
+    expect(run).toHaveBeenNthCalledWith(5, {
+      args: ["checkout", detachedHead],
+      cwd: "/repo/template",
+    });
+    expect(result).toEqual({
+      text: "Merged codex/slack/1710000000-0002 into main.",
     });
   });
 });

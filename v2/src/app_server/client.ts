@@ -4,8 +4,9 @@ import {
 } from "./events.js";
 
 type AppServerClientOptions = {
-  writeLine(line: string): void;
+  writeLine(line: string): void | Promise<void>;
   createRequestId?(): string;
+  requestTimeoutMs?: number;
 };
 
 type PendingRequest = {
@@ -20,10 +21,14 @@ const CLIENT_INFO = {
   version: "0.1.0",
 } as const;
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 export class AppServerClient {
   readonly events = new AppServerEventStream();
 
   private readonly pendingRequests = new Map<string, PendingRequest>();
+  private readonly pendingRequestTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private transportFailure: Error | null = null;
   private nextRequestId = 1;
 
   constructor(private readonly options: AppServerClientOptions) {}
@@ -62,8 +67,10 @@ export class AppServerClient {
   }
 
   failPendingRequests(error: Error): void {
+    this.transportFailure ??= error;
     const pendingRequests = [...this.pendingRequests.values()];
     this.pendingRequests.clear();
+    this.clearPendingRequestTimers();
 
     for (const pendingRequest of pendingRequests) {
       pendingRequest.reject(error);
@@ -88,6 +95,7 @@ export class AppServerClient {
     }
 
     this.pendingRequests.delete(message.response.id);
+    this.clearPendingRequestTimer(message.response.id);
 
     if ("error" in message.response) {
       pendingRequest.reject(new Error(message.response.error.message));
@@ -101,6 +109,10 @@ export class AppServerClient {
     method: string,
     params: Record<string, unknown>,
   ): Promise<T> {
+    if (this.transportFailure) {
+      return Promise.reject(this.transportFailure);
+    }
+
     const id = this.createRequestId();
     const payload = JSON.stringify({ id, method, params });
     let pendingRequest: PendingRequest | undefined;
@@ -111,16 +123,67 @@ export class AppServerClient {
         reject,
       };
       this.pendingRequests.set(id, pendingRequest);
+      this.startRequestTimeout(id, pendingRequest);
     });
 
     try {
-      this.options.writeLine(payload);
+      const writeResult = this.options.writeLine(payload);
+      if (isPromiseLike(writeResult)) {
+        void writeResult.catch((error: unknown) => {
+          const transportError = asError(error, "App Server transport write failed");
+          this.pendingRequests.delete(id);
+          pendingRequest?.reject(transportError);
+          this.failPendingRequests(transportError);
+        });
+      }
     } catch (error) {
+      const transportError = asError(error, "App Server transport write failed");
       this.pendingRequests.delete(id);
-      pendingRequest?.reject(asError(error, "App Server transport write failed"));
+      pendingRequest?.reject(transportError);
+      this.failPendingRequests(transportError);
     }
 
     return promise as Promise<T>;
+  }
+
+  private startRequestTimeout(id: string, pendingRequest: PendingRequest): void {
+    const requestTimeoutMs = this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (requestTimeoutMs <= 0) {
+      return;
+    }
+
+    const timeoutHandle = setTimeout(() => {
+      if (!this.pendingRequests.has(id)) {
+        this.pendingRequestTimers.delete(id);
+        return;
+      }
+
+      const error = new Error(`App Server request timed out after ${requestTimeoutMs}ms`);
+      this.pendingRequests.delete(id);
+      this.pendingRequestTimers.delete(id);
+      pendingRequest.reject(error);
+      this.failPendingRequests(error);
+    }, requestTimeoutMs);
+    timeoutHandle.unref?.();
+    this.pendingRequestTimers.set(id, timeoutHandle);
+  }
+
+  private clearPendingRequestTimer(id: string): void {
+    const timeoutHandle = this.pendingRequestTimers.get(id);
+    if (!timeoutHandle) {
+      return;
+    }
+
+    clearTimeout(timeoutHandle);
+    this.pendingRequestTimers.delete(id);
+  }
+
+  private clearPendingRequestTimers(): void {
+    for (const timeoutHandle of this.pendingRequestTimers.values()) {
+      clearTimeout(timeoutHandle);
+    }
+
+    this.pendingRequestTimers.clear();
   }
 
   private createRequestId(): string {
@@ -204,4 +267,13 @@ function asError(error: unknown, fallbackMessage: string): Error {
   }
 
   return new Error(fallbackMessage);
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<void> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }

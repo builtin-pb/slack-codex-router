@@ -39,8 +39,10 @@ describe("slack blocks", () => {
   it("renders thread controls conditionally from thread state", () => {
     const blocks = buildThreadControls({
       canInterrupt: true,
+      interruptTurnId: "turn_abc",
       canReview: false,
       canMerge: true,
+      mergeThreadId: "thread_abc",
     });
 
     expect(blocks).toHaveLength(1);
@@ -48,10 +50,16 @@ describe("slack blocks", () => {
       type: "actions",
       elements: [
         expect.objectContaining({ action_id: "status" }),
-        expect.objectContaining({ action_id: "interrupt" }),
+        expect.objectContaining({
+          action_id: "interrupt",
+          value: "interrupt:turn_abc",
+        }),
         expect.objectContaining({ action_id: "what_changed" }),
         expect.objectContaining({ action_id: "open_diff" }),
-        expect.objectContaining({ action_id: "merge_to_main" }),
+        expect.objectContaining({
+          action_id: "merge_to_main",
+          value: "merge_to_main:thread_abc",
+        }),
         expect.objectContaining({ action_id: "restart_router" }),
         expect.objectContaining({ action_id: "archive_task" }),
       ],

@@ -7,7 +7,7 @@ describe("recoverAfterRestart matrix", () => {
     const result = await recoverAfterRestart({
       pendingRestartIntent: {
         slackChannelId: "C08TEMPLATE",
-        slackThreadTs: "1710000000.0009",
+        slackThreadTs: "idle-thread",
         requestedAt: "2026-03-30T00:00:00.000Z",
       },
       recoverableThreads: [
@@ -38,7 +38,7 @@ describe("recoverAfterRestart matrix", () => {
 
     expect(result).toEqual({
       recoveredThreadCount: 2,
-      notifyThreadTs: "1710000000.0009",
+      notifyThreadTs: "idle-thread",
       notifyChannelId: "C08TEMPLATE",
       recoveredThreads: [
         {
@@ -90,5 +90,45 @@ describe("recoverAfterRestart matrix", () => {
     } finally {
       store.close();
     }
+  });
+
+  it("does not target a restart notice at a thread that was not actually recovered", async () => {
+    const result = await recoverAfterRestart({
+      pendingRestartIntent: {
+        slackChannelId: "C08FAILED",
+        slackThreadTs: "1710000000.0099",
+        requestedAt: "2026-03-30T00:02:00.000Z",
+      },
+      recoverableThreads: [
+        {
+          slackChannelId: "C08RUNNING",
+          slackThreadTs: "1710000000.0010",
+          appServerThreadId: "thread_running",
+          activeTurnId: "turn_running",
+          appServerSessionStale: false,
+          state: "running",
+          worktreePath: "/repo/worktree-running",
+          branchName: "feature",
+          baseBranch: "main",
+        },
+      ],
+    });
+
+    expect(result.recoveredThreadCount).toBe(1);
+    expect(result.notifyChannelId).toBeNull();
+    expect(result.notifyThreadTs).toBeNull();
+    expect(result.recoveredThreads).toEqual([
+      {
+        slackChannelId: "C08RUNNING",
+        slackThreadTs: "1710000000.0010",
+        appServerThreadId: "thread_running",
+        activeTurnId: null,
+        appServerSessionStale: true,
+        state: "interrupted",
+        worktreePath: "/repo/worktree-running",
+        branchName: "feature",
+        baseBranch: "main",
+      },
+    ]);
   });
 });

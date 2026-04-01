@@ -64,6 +64,22 @@ describe("WorktreeManager real git", () => {
     ).rejects.toThrow();
   });
 
+  it("fails when the target worktree path already exists as a plain directory", async () => {
+    const repo = await createGitRepoFixture();
+    cleanups.push(repo.cleanup);
+
+    const worktreePath = repo.buildWorktreePath("1710000000.0007");
+    await repo.createNonEmptyDirectory(worktreePath);
+
+    await expect(
+      repo.createWorktreeManager().ensureThreadWorktree({
+        repoPath: repo.repoPath,
+        slackThreadTs: "1710000000.0007",
+        baseBranch: repo.defaultBranch,
+      }),
+    ).rejects.toThrow();
+  });
+
   it("shows that linked worktrees dirty the root checkout", async () => {
     const repo = await createGitRepoFixture();
     cleanups.push(repo.cleanup);

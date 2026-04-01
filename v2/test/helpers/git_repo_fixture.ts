@@ -77,6 +77,12 @@ export async function createGitRepoFixture(options: GitRepoFixtureOptions = {}) 
       const result = await execFileAsync("git", ["branch", "--show-current"], { cwd });
       return result.stdout.trim();
     },
+    async checkout(cwd: string, branch: string) {
+      await execFileAsync("git", ["checkout", branch], { cwd });
+    },
+    async createBranch(cwd: string, branch: string) {
+      await execFileAsync("git", ["checkout", "-b", branch], { cwd });
+    },
     async statusPorcelain(cwd: string) {
       const result = await execFileAsync("git", ["status", "--porcelain"], { cwd });
       return result.stdout;
@@ -102,9 +108,15 @@ export async function createGitRepoFixture(options: GitRepoFixtureOptions = {}) 
     async fileContents(cwd: string, relativePath: string) {
       return readFileSync(join(cwd, relativePath), "utf8");
     },
+    async showFile(ref: string, relativePath: string) {
+      const result = await execFileAsync("git", ["show", `${ref}:${relativePath}`], {
+        cwd: repoPath,
+      });
+      return result.stdout;
+    },
     createWorktreeManager() {
       return new WorktreeManager({
-        pathExists: () => false,
+        pathExists: existsSync,
         run: async ({ args, cwd }) => {
           await execFileAsync("git", args, { cwd });
         },

@@ -10,7 +10,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export async function createLauncherFixture() {
+type LauncherFixtureOptions = {
+  exitCodes?: number[];
+};
+
+export async function createLauncherFixture(options: LauncherFixtureOptions = {}) {
   const tempDir = mkdtempSync(join(tmpdir(), "router-launcher-fixture-"));
   const repoRootPath = fileURLToPath(new URL("../../..", import.meta.url));
   const sourceRoot = join(repoRootPath, "v2", "src");
@@ -21,6 +25,7 @@ export async function createLauncherFixture() {
   const wrapperEntry = join(tempDir, "launcher-wrapper.mjs");
   const runtimeLauncherPath = join(tempRuntimeDir, "launcher.ts");
   const runtimeRestartPath = join(tempRuntimeDir, "restart.ts");
+  const exitCodes = options.exitCodes ?? [75, 0];
 
   mkdirSync(tempRuntimeDir, { recursive: true });
   writeFileSync(join(tempDir, "package.json"), JSON.stringify({ type: "module" }), "utf8");
@@ -32,7 +37,9 @@ export async function createLauncherFixture() {
     [
       'import { appendFileSync } from "node:fs";',
       'appendFileSync(process.env.LAUNCHER_TEST_LOG, `worker:${process.env.LAUNCHER_TEST_GENERATION}\\n`, "utf8");',
-      'process.exit(process.env.LAUNCHER_TEST_GENERATION === "1" ? 75 : 0);',
+      "const exitCodes = JSON.parse(process.env.LAUNCHER_TEST_EXIT_CODES);",
+      "const generation = Number(process.env.LAUNCHER_TEST_GENERATION ?? '1');",
+      "process.exit(Number(exitCodes[generation - 1] ?? 0));",
     ].join("\n"),
     "utf8",
   );
@@ -67,6 +74,7 @@ export async function createLauncherFixture() {
       ...process.env,
       LAUNCHER_TEST_LOG: logFile,
       LAUNCHER_TEST_WORKER: workerScript,
+      LAUNCHER_TEST_EXIT_CODES: JSON.stringify(exitCodes),
     },
     async waitForWorkerGeneration(n: number) {
       for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -84,7 +92,10 @@ export async function createLauncherFixture() {
       return safeReadFile(logFile)
         .split("\n")
         .filter((line) => line.startsWith("worker:"))
-        .map((line) => (line.endsWith("1") ? 75 : 0));
+        .map((line) => {
+          const generation = Number(line.split(":")[1] ?? "1");
+          return Number(exitCodes[generation - 1] ?? 0);
+        });
     },
     async cleanup() {
       rmSync(tempDir, { recursive: true, force: true });
