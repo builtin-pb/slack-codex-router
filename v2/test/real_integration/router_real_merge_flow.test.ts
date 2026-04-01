@@ -126,6 +126,75 @@ describe("real merge flow", () => {
     repo.cleanup();
   });
 
+  it("keeps the root checkout on the base branch after a real router merge", async () => {
+    const repo = await createGitRepoFixture({ divergedBranch: "feature/router-merge-base" });
+    await repo.createBranch(repo.repoPath, "scratch/router-merge-context");
+    await repo.checkout(repo.repoPath, "scratch/router-merge-context");
+
+    const store = new RouterStore(":memory:");
+    const worktree = await repo.createWorktreeManager().ensureThreadWorktree({
+      repoPath: repo.repoPath,
+      slackThreadTs: "1710000000.0016",
+      baseBranch: repo.defaultBranch,
+    });
+
+    await repo.commitFile(
+      worktree.worktreePath,
+      "feature.txt",
+      "router merge base\n",
+      "feature change",
+    );
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0016",
+      appServerThreadId: "thread_merge",
+      activeTurnId: null,
+      appServerSessionStale: false,
+      state: "idle",
+      worktreePath: worktree.worktreePath,
+      branchName: worktree.branchName,
+      baseBranch: repo.defaultBranch,
+    });
+
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: repo.projectsFile,
+      store,
+      threadStart: async () => ({ threadId: "thread_merge" }),
+      turnStart: async () => ({ turnId: "turn_merge" }),
+      getRepositoryStatus,
+      executeMergeToMain: async (input) =>
+        mergeBranchToTarget({
+          ...input,
+          restoreOriginalHead: false,
+        }),
+    });
+
+    await expect(
+      service.confirmMergeToMain("U123", "C08TEMPLATE", "1710000000.0016"),
+    ).resolves.toEqual({
+      text: `Merged ${worktree.branchName} into ${repo.defaultBranch}.`,
+    });
+
+    expect(await repo.currentBranch(repo.repoPath)).toBe(repo.defaultBranch);
+    expect(await repo.showFile(repo.defaultBranch, "feature.txt")).toBe("router merge base\n");
+    expect(store.getThread("C08TEMPLATE", "1710000000.0016")).toEqual({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0016",
+      appServerThreadId: "thread_merge",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "idle",
+      worktreePath: repo.repoPath,
+      branchName: repo.defaultBranch,
+      baseBranch: repo.defaultBranch,
+    });
+
+    store.close();
+    repo.cleanup();
+  });
+
   it("restores the original root branch after a successful merge", async () => {
     const repo = await createGitRepoFixture({ divergedBranch: "feature/restore-root-branch" });
     await repo.createBranch(repo.repoPath, "scratch/root-context");
