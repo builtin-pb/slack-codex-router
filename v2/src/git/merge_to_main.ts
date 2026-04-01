@@ -111,6 +111,9 @@ export async function mergeBranchToTarget(input: {
   ).stdout.trim();
   const originalHead = await readHeadState(run, input.repoPath, originalBranch);
   const restoreOriginalHead = input.restoreOriginalHead ?? true;
+  const originalHeadCanRestore =
+    originalHead &&
+    (originalHead.kind === "detached" || originalHead.value !== input.targetBranch);
 
   await run({
     args: ["checkout", input.targetBranch],
@@ -132,18 +135,25 @@ export async function mergeBranchToTarget(input: {
       // Best-effort cleanup only; preserve the original merge failure.
     }
 
-    throw error;
-  } finally {
-    if (
-      restoreOriginalHead &&
-      originalHead &&
-      (originalHead.kind === "detached" || originalHead.value !== input.targetBranch)
-    ) {
-      await run({
-        args: ["checkout", originalHead.value],
-        cwd: input.repoPath,
-      });
+    if (originalHeadCanRestore) {
+      try {
+        await run({
+          args: ["checkout", originalHead.value],
+          cwd: input.repoPath,
+        });
+      } catch {
+        // Best-effort cleanup only; preserve the original merge failure.
+      }
     }
+
+    throw error;
+  }
+
+  if (restoreOriginalHead && originalHeadCanRestore) {
+    await run({
+      args: ["checkout", originalHead.value],
+      cwd: input.repoPath,
+    });
   }
 
   return {
