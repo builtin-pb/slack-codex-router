@@ -287,12 +287,13 @@ export class RouterService {
       throw new Error("Choice is no longer valid. Request the latest prompt and try again.");
     }
 
-    this.options.store.upsertThread({
+    const pendingThread = {
       ...thread,
       activeTurnId: null,
       appServerSessionStale: false,
       state: "running",
-    });
+    } as ThreadRecord;
+    this.options.store.upsertThread(pendingThread);
 
     let turn: Record<string, unknown>;
     try {
@@ -307,7 +308,7 @@ export class RouterService {
     }
 
     const resumedThreadRecord = {
-      ...(this.options.store.getThread(slackChannelId, slackThreadTs) ?? thread),
+      ...pendingThread,
       slackChannelId,
       slackThreadTs,
       appServerThreadId: thread.appServerThreadId,
@@ -354,23 +355,16 @@ export class RouterService {
       target: { type: "uncommittedChanges" },
     });
 
-    const latestThread = this.options.store.getThread(slackChannelId, slackThreadTs);
     if (
-      !latestThread ||
-      latestThread.appServerThreadId !== thread.appServerThreadId ||
-      latestThread.state !== "idle" ||
-      latestThread.activeTurnId !== thread.activeTurnId
+      this.updateThreadIfCurrent(slackChannelId, slackThreadTs, thread, {
+        ...thread,
+        activeTurnId: readTurnId(review),
+        appServerSessionStale: false,
+        state: "running",
+      })
     ) {
-      return;
+      this.invalidateMergePreviews(slackChannelId, slackThreadTs);
     }
-
-    this.options.store.upsertThread({
-      ...latestThread,
-      activeTurnId: readTurnId(review),
-      appServerSessionStale: false,
-      state: "running",
-    });
-    this.invalidateMergePreviews(slackChannelId, slackThreadTs);
   }
 
   getThreadStatus(
@@ -609,12 +603,12 @@ export class RouterService {
           threadId: reboundThread.threadId,
         });
       } catch (error) {
-        this.options.store.upsertThread(existingThread);
+        this.updateThreadIfCurrent(input.channelId, input.threadTs, reboundRecord, existingThread);
         throw error;
       }
 
-      this.options.store.upsertThread({
-        ...(this.options.store.getThread(input.channelId, input.threadTs) ?? reboundRecord),
+      const continuedThreadRecord = {
+        ...reboundRecord,
         slackChannelId: input.channelId,
         slackThreadTs: input.threadTs,
         appServerThreadId: reboundThread.threadId,
@@ -623,9 +617,18 @@ export class RouterService {
         worktreePath: reboundWorktree.worktreePath,
         branchName: reboundWorktree.branchName,
         baseBranch: reboundWorktree.baseBranch,
-      });
-      this.invalidateMergePreviews(input.channelId, input.threadTs);
-      await input.reply(renderContinuedTask(project.name));
+      };
+      if (
+        this.updateThreadIfCurrent(
+          input.channelId,
+          input.threadTs,
+          reboundRecord,
+          continuedThreadRecord,
+        )
+      ) {
+        this.invalidateMergePreviews(input.channelId, input.threadTs);
+        await input.reply(renderContinuedTask(project.name));
+      }
       return;
     }
 
@@ -662,12 +665,12 @@ export class RouterService {
           threadId: restartedThread.threadId,
         });
       } catch (error) {
-        this.options.store.upsertThread(existingThread);
+        this.updateThreadIfCurrent(input.channelId, input.threadTs, restartedRecord, existingThread);
         throw error;
       }
 
-      this.options.store.upsertThread({
-        ...(this.options.store.getThread(input.channelId, input.threadTs) ?? restartedRecord),
+      const continuedThreadRecord = {
+        ...restartedRecord,
         slackChannelId: input.channelId,
         slackThreadTs: input.threadTs,
         appServerThreadId: restartedThread.threadId,
@@ -676,9 +679,18 @@ export class RouterService {
         worktreePath: restartedWorktree.worktreePath,
         branchName: restartedWorktree.branchName,
         baseBranch: restartedWorktree.baseBranch,
-      });
-      this.invalidateMergePreviews(input.channelId, input.threadTs);
-      await input.reply(renderContinuedTask(project.name));
+      };
+      if (
+        this.updateThreadIfCurrent(
+          input.channelId,
+          input.threadTs,
+          restartedRecord,
+          continuedThreadRecord,
+        )
+      ) {
+        this.invalidateMergePreviews(input.channelId, input.threadTs);
+        await input.reply(renderContinuedTask(project.name));
+      }
       return;
     }
 
@@ -703,12 +715,12 @@ export class RouterService {
         threadId: existingThread.appServerThreadId,
       });
     } catch (error) {
-      this.options.store.upsertThread(existingThread);
+      this.updateThreadIfCurrent(input.channelId, input.threadTs, provisionalThread, existingThread);
       throw error;
     }
 
-    this.options.store.upsertThread({
-      ...(this.options.store.getThread(input.channelId, input.threadTs) ?? provisionalThread),
+    const continuedThreadRecord = {
+      ...provisionalThread,
       slackChannelId: input.channelId,
       slackThreadTs: input.threadTs,
       appServerThreadId: existingThread.appServerThreadId,
@@ -717,9 +729,18 @@ export class RouterService {
       worktreePath: provisionalThread.worktreePath,
       branchName: provisionalThread.branchName,
       baseBranch: provisionalThread.baseBranch,
-    });
-    this.invalidateMergePreviews(input.channelId, input.threadTs);
-    await input.reply(renderContinuedTask(project.name));
+    };
+    if (
+      this.updateThreadIfCurrent(
+        input.channelId,
+        input.threadTs,
+        provisionalThread,
+        continuedThreadRecord,
+      )
+    ) {
+      this.invalidateMergePreviews(input.channelId, input.threadTs);
+      await input.reply(renderContinuedTask(project.name));
+    }
   }
 
   private async withThreadCreationLock<T>(

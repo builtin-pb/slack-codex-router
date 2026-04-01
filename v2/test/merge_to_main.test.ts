@@ -101,4 +101,36 @@ describe("buildMergeConfirmation", () => {
       text: "Merged codex/slack/1710000000-0002 into main.",
     });
   });
+
+  it("can leave the target branch checked out when restoration is disabled", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "feature/original\n" })
+      .mockResolvedValue({ stdout: "" });
+
+    const result = await mergeBranchToTarget({
+      repoPath: "/repo/template/.codex-worktrees/1710000000-0003",
+      sourceBranch: "codex/slack/1710000000-0003",
+      targetBranch: "main",
+      restoreOriginalHead: false,
+      run,
+    });
+
+    expect(run).toHaveBeenNthCalledWith(1, {
+      args: ["branch", "--show-current"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0003",
+    });
+    expect(run).toHaveBeenNthCalledWith(2, {
+      args: ["checkout", "main"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0003",
+    });
+    expect(run).toHaveBeenNthCalledWith(3, {
+      args: ["merge", "--no-ff", "--no-edit", "codex/slack/1710000000-0003"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0003",
+    });
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(result).toEqual({
+      text: "Merged codex/slack/1710000000-0003 into main.",
+    });
+  });
 });

@@ -93,6 +93,7 @@ export async function main(): Promise<void> {
         repoPath: input.repoPath,
         sourceBranch: input.sourceBranch,
         targetBranch: input.targetBranch,
+        restoreOriginalHead: false,
         run: async ({ args, cwd }) => {
           const result = await execFileAsync("git", args, { cwd });
           return { stdout: result.stdout };
