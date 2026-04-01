@@ -587,6 +587,163 @@ describe("RouterService edge cases", () => {
     });
   });
 
+  it("does not clobber a newer thread state when choice submission resolves after the thread changed", async () => {
+    const fixture = createTempProjectFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+
+    let resolveTurnStart: ((value: { turnId: string }) => void) | undefined;
+    const turnStart = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ turnId: string }>((resolve) => {
+          resolveTurnStart = resolve;
+        }),
+    );
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0004",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_old",
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+    const promptId = store.recordChoicePrompt({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0004",
+      options: ["approve", "reject"],
+    });
+
+    const submitPromise = service.submitChoice(
+      "U123",
+      "C08TEMPLATE",
+      "1710000000.0004",
+      "approve",
+      promptId ?? undefined,
+    );
+
+    for (let attempt = 0; attempt < 5 && turnStart.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(turnStart).toHaveBeenCalledTimes(1);
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0004",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    resolveTurnStart?.({ turnId: "turn_choice" });
+    await submitPromise;
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0004")).toEqual({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0004",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+  });
+
+  it("does not clobber a newer thread state when a stale-session rebind resolves after the thread changed", async () => {
+    const fixture = createTempProjectFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+
+    let resolveTurnStart: ((value: { turnId: string }) => void) | undefined;
+    const threadStart = vi.fn().mockResolvedValue({ threadId: "thread_new" });
+    const turnStart = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ turnId: string }>((resolve) => {
+          resolveTurnStart = resolve;
+        }),
+    );
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart,
+      turnStart,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0005",
+      appServerThreadId: "thread_old",
+      activeTurnId: null,
+      appServerSessionStale: true,
+      state: "interrupted",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    const handlePromise = service.handleSlackMessage({
+      channelId: "C08TEMPLATE",
+      messageTs: "1710000000.0006",
+      threadTs: "1710000000.0005",
+      text: "continue",
+      userId: "U123",
+      reply: vi.fn(),
+    });
+
+    for (let attempt = 0; attempt < 5 && turnStart.mock.calls.length === 0; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(threadStart).toHaveBeenCalledTimes(1);
+    expect(turnStart).toHaveBeenCalledTimes(1);
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0005",
+      appServerThreadId: "thread_old",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+
+    resolveTurnStart?.({ turnId: "turn_new" });
+    await handlePromise;
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0005")).toEqual({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0005",
+      appServerThreadId: "thread_old",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "main",
+      baseBranch: "main",
+    });
+  });
+
   it("rejects review starts when the review control is not configured", async () => {
     const fixture = createTempProjectFixture();
     cleanups.push(fixture.cleanup);
