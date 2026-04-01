@@ -174,14 +174,19 @@ export class RouterService {
           threadId: startedThread.threadId,
         });
       } catch (error) {
-        this.options.store.upsertThread({
-          ...baseThreadRecord,
-          state: "failed_setup",
-        });
+        this.updateThreadIfCurrent(
+          input.channelId,
+          input.threadTs,
+          baseThreadRecord,
+          {
+            ...baseThreadRecord,
+            state: "failed_setup",
+          },
+        );
         throw error;
       }
 
-      this.options.store.upsertThread({
+      const startedThreadRecord = {
         ...(this.options.store.getThread(input.channelId, input.threadTs) ?? baseThreadRecord),
         slackChannelId: input.channelId,
         slackThreadTs: input.threadTs,
@@ -191,8 +196,17 @@ export class RouterService {
         worktreePath: worktree.worktreePath,
         branchName: worktree.branchName,
         baseBranch: worktree.baseBranch,
-      });
-      await input.reply(renderStartedTask(project.name));
+      };
+      if (
+        this.updateThreadIfCurrent(
+          input.channelId,
+          input.threadTs,
+          baseThreadRecord,
+          startedThreadRecord,
+        )
+      ) {
+        await input.reply(renderStartedTask(project.name));
+      }
     });
   }
 
@@ -288,11 +302,11 @@ export class RouterService {
         threadId: thread.appServerThreadId,
       });
     } catch (error) {
-      this.options.store.upsertThread(thread);
+      this.updateThreadIfCurrent(slackChannelId, slackThreadTs, pendingThread, thread);
       throw error;
     }
 
-    this.options.store.upsertThread({
+    const resumedThreadRecord = {
       ...(this.options.store.getThread(slackChannelId, slackThreadTs) ?? thread),
       slackChannelId,
       slackThreadTs,
@@ -302,9 +316,18 @@ export class RouterService {
       worktreePath: thread.worktreePath,
       branchName: thread.branchName,
       baseBranch: thread.baseBranch,
-    });
-    this.options.store.resolveChoicePrompts(slackChannelId, slackThreadTs);
-    this.invalidateMergePreviews(slackChannelId, slackThreadTs);
+    };
+    if (
+      this.updateThreadIfCurrent(
+        slackChannelId,
+        slackThreadTs,
+        pendingThread,
+        resumedThreadRecord,
+      )
+    ) {
+      this.options.store.resolveChoicePrompts(slackChannelId, slackThreadTs);
+      this.invalidateMergePreviews(slackChannelId, slackThreadTs);
+    }
   }
 
   async startReview(
@@ -513,7 +536,7 @@ export class RouterService {
       targetBranch: thread.baseBranch,
     });
 
-    this.options.store.upsertThread({
+    this.updateThreadIfCurrent(slackChannelId, slackThreadTs, thread, {
       ...thread,
       worktreePath: mergedRepoPath,
       branchName: thread.baseBranch,
@@ -764,6 +787,21 @@ export class RouterService {
     this.options.store.resolveMergePreviews(slackChannelId, slackThreadTs);
   }
 
+  private updateThreadIfCurrent(
+    slackChannelId: string,
+    slackThreadTs: string,
+    expectedThread: ThreadRecord,
+    nextThread: ThreadRecord,
+  ): boolean {
+    const latestThread = this.options.store.getThread(slackChannelId, slackThreadTs);
+    if (!latestThread || !sameThreadSnapshot(latestThread, expectedThread)) {
+      return false;
+    }
+
+    this.options.store.upsertThread(nextThread);
+    return true;
+  }
+
   private matchesLatestMergePreview(
     slackChannelId: string,
     slackThreadTs: string,
@@ -839,6 +877,20 @@ function deriveRepositoryPath(worktreePath: string): string {
   }
 
   return worktreePath;
+}
+
+function sameThreadSnapshot(current: ThreadRecord, expected: ThreadRecord): boolean {
+  return (
+    current.slackChannelId === expected.slackChannelId &&
+    current.slackThreadTs === expected.slackThreadTs &&
+    current.appServerThreadId === expected.appServerThreadId &&
+    current.activeTurnId === expected.activeTurnId &&
+    Boolean(current.appServerSessionStale) === Boolean(expected.appServerSessionStale) &&
+    current.state === expected.state &&
+    current.worktreePath === expected.worktreePath &&
+    current.branchName === expected.branchName &&
+    current.baseBranch === expected.baseBranch
+  );
 }
 
 function loadProjects(projectsFile: string): Map<string, ProjectConfig> {

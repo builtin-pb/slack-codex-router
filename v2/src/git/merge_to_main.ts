@@ -91,6 +91,7 @@ export async function mergeBranchToTarget(input: {
   repoPath: string;
   sourceBranch: string;
   targetBranch: string;
+  restoreOriginalHead?: boolean;
   run?: MergeRunner;
 }): Promise<{ text: string }> {
   const run =
@@ -109,6 +110,7 @@ export async function mergeBranchToTarget(input: {
     })
   ).stdout.trim();
   const originalHead = await readHeadState(run, input.repoPath, originalBranch);
+  const restoreOriginalHead = input.restoreOriginalHead ?? true;
 
   await run({
     args: ["checkout", input.targetBranch],
@@ -132,12 +134,11 @@ export async function mergeBranchToTarget(input: {
 
     throw error;
   } finally {
-    if (originalHead?.kind === "branch" && originalHead.value !== input.targetBranch) {
-      await run({
-        args: ["checkout", originalHead.value],
-        cwd: input.repoPath,
-      });
-    } else if (originalHead?.kind === "detached") {
+    if (
+      restoreOriginalHead &&
+      originalHead &&
+      (originalHead.kind === "detached" || originalHead.value !== input.targetBranch)
+    ) {
       await run({
         args: ["checkout", originalHead.value],
         cwd: input.repoPath,
