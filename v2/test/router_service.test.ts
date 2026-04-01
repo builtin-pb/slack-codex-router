@@ -1453,6 +1453,85 @@ describe("RouterService", () => {
     expect(executeMergeToMain).not.toHaveBeenCalled();
   });
 
+  it("does not clobber a newer thread state when merge confirmation resolves after the thread changed", async () => {
+    const fixture = createProjectRegistryFixture();
+    cleanups.push(fixture.cleanup);
+    const store = new RouterStore(":memory:");
+    cleanups.push(() => store.close());
+    let resolveMerge:
+      | ((value: { text: string }) => void)
+      | undefined;
+    const getRepositoryStatus = vi.fn().mockResolvedValue({
+      repositoryName: "template",
+      sourceBranch: "codex/slack/1710000000-0001",
+      targetBranch: "main",
+      worktreeStatus: "clean",
+      checksStatus: "not run",
+    });
+    const executeMergeToMain = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ text: string }>((resolve) => {
+          resolveMerge = resolve;
+        }),
+    );
+    const service = new RouterService({
+      allowedUserId: "U123",
+      projectsFile: fixture.projectsFile,
+      store,
+      threadStart: vi.fn(),
+      turnStart: vi.fn(),
+      getRepositoryStatus,
+      executeMergeToMain,
+    });
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: null,
+      state: "idle",
+      worktreePath: fixture.projectDir,
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+
+    const mergePromise = service.confirmMergeToMain(
+      "U123",
+      "C08TEMPLATE",
+      "1710000000.0001",
+    );
+
+    await Promise.resolve();
+    expect(executeMergeToMain).toHaveBeenCalledTimes(1);
+
+    store.upsertThread({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+
+    resolveMerge?.({ text: "Merged codex/slack/1710000000-0001 into main." });
+    await mergePromise;
+
+    expect(store.getThread("C08TEMPLATE", "1710000000.0001")).toEqual({
+      slackChannelId: "C08TEMPLATE",
+      slackThreadTs: "1710000000.0001",
+      appServerThreadId: "thread_existing",
+      activeTurnId: "turn_followup",
+      appServerSessionStale: false,
+      state: "awaiting_user_input",
+      worktreePath: fixture.projectDir,
+      branchName: "codex/slack/1710000000-0001",
+      baseBranch: "main",
+    });
+  });
+
   it("rejects unauthorized users before touching the project registry or App Server", async () => {
     const fixture = createProjectRegistryFixture();
     cleanups.push(fixture.cleanup);

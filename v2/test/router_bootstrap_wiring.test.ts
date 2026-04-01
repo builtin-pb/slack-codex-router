@@ -422,13 +422,6 @@ describe("router bootstrap wiring", () => {
         cwd: "/repo/project",
       },
     );
-    expect(execFileAsync).toHaveBeenNthCalledWith(
-      5,
-      "git",
-      ["checkout", "feature/original"],
-      {
-        cwd: "/repo/project",
-      },
-    );
+    expect(execFileAsync).toHaveBeenCalledTimes(4);
   });
 });

@@ -82,6 +82,46 @@ function makeRuntimeHarness(overrides: {
 }
 
 describe("startRouterRuntime regressions", () => {
+  it("detaches runtime listeners and fails pending requests if initialization rejects", async () => {
+    const detachEventListener = vi.fn();
+    const detachLineListener = vi.fn();
+    const initializeError = new Error("initialize failed");
+    const harness = makeRuntimeHarness({
+      waitForExit: () => new Promise<number | null>(() => {}),
+    });
+    harness.initialize.mockRejectedValueOnce(initializeError);
+    harness.subscribe.mockReturnValueOnce(detachEventListener);
+    harness.onLine.mockReturnValueOnce(detachLineListener);
+
+    await expect(
+      startRouterRuntime({
+        config: {
+          slackBotToken: "xoxb-test",
+          slackAppToken: "xapp-test",
+          allowedUserId: "U123",
+          projectsFile: "/repo/config/projects.yaml",
+          routerStateDb: "/repo/logs/router-v2.sqlite3",
+          appServerCommand: ["codex", "app-server"],
+        },
+        store: harness.store,
+        appServerProcess: {
+          writeLine: vi.fn(),
+          onLine: harness.onLine,
+          waitForExit: harness.waitForExit,
+        },
+        appServerClient: harness.appServerClient,
+        slackApp: harness.slackApp,
+        routerService: {},
+        registerSlackMessageHandler: harness.registerSlackMessageHandler,
+      }),
+    ).rejects.toThrow("initialize failed");
+
+    expect(detachEventListener).toHaveBeenCalledTimes(1);
+    expect(detachLineListener).toHaveBeenCalledTimes(1);
+    expect(harness.failPendingRequests).toHaveBeenCalledTimes(1);
+    expect(harness.failPendingRequests).toHaveBeenCalledWith(initializeError);
+  });
+
   it("does not post recovery or clear restart intent when no restart is pending", async () => {
     const harness = makeRuntimeHarness();
 

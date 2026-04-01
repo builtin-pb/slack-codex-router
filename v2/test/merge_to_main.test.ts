@@ -133,4 +133,44 @@ describe("buildMergeConfirmation", () => {
       text: "Merged codex/slack/1710000000-0003 into main.",
     });
   });
+
+  it("still restores the original branch on merge failure when restoration is disabled", async () => {
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "feature/original\n" })
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockRejectedValueOnce(new Error("merge failed"))
+      .mockResolvedValue({ stdout: "" });
+
+    await expect(
+      mergeBranchToTarget({
+        repoPath: "/repo/template/.codex-worktrees/1710000000-0004",
+        sourceBranch: "codex/slack/1710000000-0004",
+        targetBranch: "main",
+        restoreOriginalHead: false,
+        run,
+      }),
+    ).rejects.toThrow("merge failed");
+
+    expect(run).toHaveBeenNthCalledWith(1, {
+      args: ["branch", "--show-current"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0004",
+    });
+    expect(run).toHaveBeenNthCalledWith(2, {
+      args: ["checkout", "main"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0004",
+    });
+    expect(run).toHaveBeenNthCalledWith(3, {
+      args: ["merge", "--no-ff", "--no-edit", "codex/slack/1710000000-0004"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0004",
+    });
+    expect(run).toHaveBeenNthCalledWith(4, {
+      args: ["merge", "--abort"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0004",
+    });
+    expect(run).toHaveBeenNthCalledWith(5, {
+      args: ["checkout", "feature/original"],
+      cwd: "/repo/template/.codex-worktrees/1710000000-0004",
+    });
+  });
 });

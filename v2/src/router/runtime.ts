@@ -71,6 +71,7 @@ export async function startRouterRuntime(input: {
   ): void;
 }): Promise<void> {
   const threadsByAppServerThreadId = new Map<string, ThreadRecord>();
+  let runtimeClosed = false;
   const refreshThreadMap = (): void => {
     threadsByAppServerThreadId.clear();
     for (const record of input.store.listRecoverableThreads()) {
@@ -107,57 +108,71 @@ export async function startRouterRuntime(input: {
     input.appServerClient.handleLine(line);
   });
 
+  const closeRuntime = (error?: unknown): void => {
+    if (runtimeClosed) {
+      return;
+    }
+
+    runtimeClosed = true;
+    detachEventListener();
+    detachLineListener();
+    if (error !== undefined) {
+      input.appServerClient.failPendingRequests(asError(error));
+    }
+  };
+
   void input.appServerProcess
     .waitForExit()
     .then(() => {
-      detachEventListener();
-      detachLineListener();
-      input.appServerClient.failPendingRequests(new Error("App Server process exited"));
+      closeRuntime(new Error("App Server process exited"));
     })
     .catch((error: unknown) => {
-      detachEventListener();
-      detachLineListener();
-      input.appServerClient.failPendingRequests(asError(error));
+      closeRuntime(error);
     });
 
-  await input.appServerClient.initialize();
-  input.registerSlackMessageHandler(input.slackApp, input.routerService);
-  await input.slackApp.start();
+  try {
+    await input.appServerClient.initialize();
+    input.registerSlackMessageHandler(input.slackApp, input.routerService);
+    await input.slackApp.start();
 
-  refreshThreadMap();
-  const pendingRestartIntent = input.store.getPendingRestartIntent();
-  const recovery = await recoverAfterRestart({
-    pendingRestartIntent,
-    recoverableThreads: input.store.listRecoverableThreads(),
-  });
+    refreshThreadMap();
+    const pendingRestartIntent = input.store.getPendingRestartIntent();
+    const recovery = await recoverAfterRestart({
+      pendingRestartIntent,
+      recoverableThreads: input.store.listRecoverableThreads(),
+    });
 
-  for (const recoveredThread of recovery.recoveredThreads) {
-    input.store.upsertThread(recoveredThread);
-  }
-  refreshThreadMap();
-
-  let recoveryNoticeDelivered =
-    !recovery.notifyChannelId || !recovery.notifyThreadTs;
-
-  if (recovery.notifyChannelId && recovery.notifyThreadTs) {
-    try {
-      await input.slackApp.client.chat.postMessage({
-        channel: recovery.notifyChannelId,
-        text: `Router restarted. Recovered ${recovery.recoveredThreadCount} thread mapping(s).`,
-        thread_ts: recovery.notifyThreadTs,
-      });
-      recoveryNoticeDelivered = true;
-    } catch (error: unknown) {
-      console.error("Failed to post restart recovery notice", asError(error));
+    for (const recoveredThread of recovery.recoveredThreads) {
+      input.store.upsertThread(recoveredThread);
     }
-  }
+    refreshThreadMap();
 
-  if (recoveryNoticeDelivered) {
-    if (input.store.clearRestartIntentIfMatches?.(pendingRestartIntent) !== true) {
-      if (shouldClearRestartIntent(input.store.getPendingRestartIntent(), pendingRestartIntent)) {
-        input.store.clearRestartIntent();
+    let recoveryNoticeDelivered =
+      !recovery.notifyChannelId || !recovery.notifyThreadTs;
+
+    if (recovery.notifyChannelId && recovery.notifyThreadTs) {
+      try {
+        await input.slackApp.client.chat.postMessage({
+          channel: recovery.notifyChannelId,
+          text: `Router restarted. Recovered ${recovery.recoveredThreadCount} thread mapping(s).`,
+          thread_ts: recovery.notifyThreadTs,
+        });
+        recoveryNoticeDelivered = true;
+      } catch (error: unknown) {
+        console.error("Failed to post restart recovery notice", asError(error));
       }
     }
+
+    if (recoveryNoticeDelivered) {
+      if (input.store.clearRestartIntentIfMatches?.(pendingRestartIntent) !== true) {
+        if (shouldClearRestartIntent(input.store.getPendingRestartIntent(), pendingRestartIntent)) {
+          input.store.clearRestartIntent();
+        }
+      }
+    }
+  } catch (error) {
+    closeRuntime(error);
+    throw error;
   }
 }
 
