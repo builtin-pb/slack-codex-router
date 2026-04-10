@@ -1,0 +1,16 @@
+projects:
+  - channel_id: C0AP414G9B9
+    name: slack-codex-router
+    path: ..
+    max_concurrent_jobs: 2
+
+  - channel_id: C0ARX982VJP
+    name: codex-customization
+    path: ../../codex-customization
+    max_concurrent_jobs: 2
+
+  # Add more project channels below. Each private Slack channel maps to one local path.
+  # - channel_id: C08PROJECT2
+  #   name: another-project
+  #   path: ../../projects/another-project
+  #   max_concurrent_jobs: 2
